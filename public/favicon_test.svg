@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48">
+  <!-- Outer purple hexagon with padding to prevent cropping -->
+  <polygon points="24,4 42,14 42,34 24,44 6,34 6,14" fill="#7c3aed" />
+  <!-- Inner dark hexagon for high contrast -->
+  <polygon points="24,7 39.5,16 39.5,32 24,41 8.5,32 8.5,16" fill="#1e1b4b" />
+  <!-- YT Monogram: Perfect geometry and spacing, mimicking the original corporate logo -->
+  <!-- Y Part (Left, Pure White) -->
+  <path d="M13 16 H16.5 L18.5 23.5 L20.5 16 H24 L19.5 25.5 V34 H17.5 V25.5 Z" fill="#ffffff" />
+  <!-- T Part (Right, Bright Purple Accent) -->
+  <path d="M25 15 H35 V19 H31.5 V34 H28.5 V19 H25 Z" fill="#c084fc" />
+</svg>

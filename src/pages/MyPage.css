@@ -1,0 +1,317 @@
+.mypage-layout {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  gap: 2rem;
+  align-items: start;
+}
+
+.profile-section {
+  border: 1px solid var(--border);
+  position: sticky;
+  top: 100px;
+}
+
+.profile-avatar {
+  background-color: var(--primary);
+}
+
+.order-receipt-card {
+  border: 1px solid var(--border);
+}
+
+.receipt-item-thumb {
+  width: 40px;
+  height: 40px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+
+/* Delivery Timeline Step Component */
+.timeline-steps {
+  display: flex;
+  justify-content: space-between;
+  position: relative;
+  padding: 0 1rem;
+}
+
+.step-point {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-light);
+  position: relative;
+  z-index: 2;
+}
+
+.point-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: var(--radius-full);
+  background-color: var(--border);
+  border: 2px solid var(--white);
+  transition: all 0.2s ease;
+}
+
+.step-line {
+  flex: 1;
+  height: 2px;
+  background-color: var(--border);
+  position: relative;
+  top: 5px;
+  z-index: 1;
+}
+
+/* Timeline status active / completed modifier */
+.step-point.completed .point-dot {
+  background-color: var(--primary);
+}
+
+.step-point.completed span {
+  color: var(--primary);
+}
+
+.step-line.completed {
+  background-color: var(--primary);
+}
+
+.step-point.active .point-dot {
+  background-color: var(--primary);
+  box-shadow: 0 0 0 4px rgba(124, 58, 237, 0.2);
+}
+
+.step-point.active span {
+  color: var(--primary);
+  font-weight: 700;
+}
+
+.no-orders {
+  border: 1px solid var(--border);
+}
+
+@media (max-width: 992px) {
+  .mypage-layout {
+    grid-template-columns: 1fr;
+  }
+  
+  .profile-section {
+    position: static;
+  }
+}
+
+/* Profile Layout Clean Fix */
+.profile-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.profile-avatar {
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  border-radius: 9999px;
+  background-color: var(--primary);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.profile-header h4 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.profile-header span {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+}
+
+/* Detail items alignment - prevent wrapping email */
+.profile-details .flex.justify-between {
+  display: flex;
+  flex-direction: column !important; /* Force block alignment to fit email comfortably */
+  align-items: flex-start !important;
+  gap: 4px;
+  padding: 8px 0;
+  border-bottom: 1px dashed #e2e8f0;
+}
+
+.profile-details .flex.justify-between:last-child {
+  border-bottom: none;
+}
+
+.profile-details span.text-light {
+  font-size: 11px;
+  font-weight: 700;
+  color: #64748b;
+}
+
+.profile-details span.font-semibold {
+  font-size: 12px;
+  word-break: break-all;
+}
+
+/* Naver-style Profile Edit Modal */
+.naver-edit-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.45);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+.naver-edit-container {
+  background-color: #f9f9fc;
+  width: 440px;
+  max-width: 95%;
+  border-radius: 12px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+  overflow: hidden;
+}
+
+.naver-edit-header {
+  background-color: #ffffff;
+  padding: 18px 24px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid #eef2f6;
+}
+
+.naver-edit-header h3 {
+  font-size: 16px;
+  font-weight: 800;
+  color: #1e293b;
+  margin: 0;
+}
+
+.naver-edit-body {
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.naver-input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.naver-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: #475569;
+}
+
+.naver-input {
+  width: 100%;
+  padding: 10px 12px;
+  font-size: 13px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background-color: #ffffff;
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.naver-input:focus {
+  border-color: #03cf5d;
+  box-shadow: 0 0 0 3px rgba(3, 207, 93, 0.12);
+}
+
+.naver-input:disabled {
+  background-color: #f1f5f9;
+  color: #94a3b8;
+  cursor: not-allowed;
+}
+
+.naver-edit-footer {
+  padding: 16px 24px;
+  background-color: #ffffff;
+  border-t: 1px solid #eef2f6;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.btn-naver-submit {
+  background-color: #03cf5d;
+  color: #ffffff;
+  border: none;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 10px 20px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.btn-naver-submit:hover {
+  background-color: #02b34f;
+}
+
+.btn-naver-cancel {
+  background-color: #f1f5f9;
+  color: #475569;
+  border: 1px solid #e2e8f0;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 10px 20px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.btn-naver-cancel:hover {
+  background-color: #e2e8f0;
+}
+
+/* Password verification modal and withdraw link */
+.btn-withdraw {
+  background: none;
+  border: none;
+  color: #ef4444;
+  font-size: 11px;
+  font-weight: 700;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+}
+
+.btn-withdraw:hover {
+  background-color: #fef2f2;
+  color: #dc2626;
+}
+
+.naver-verify-container {
+  background-color: #ffffff;
+  width: 380px;
+  max-width: 90%;
+  border-radius: 12px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+  overflow: hidden;
+}
+
+.naver-verify-body {
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  text-align: center;
+}

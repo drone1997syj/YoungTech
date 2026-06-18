@@ -1,0 +1,68 @@
+.site-footer {
+  background-color: #0f172a; /* Slate 900 */
+  color: #94a3b8; /* Slate 400 */
+  border-top: 4px solid var(--primary);
+  margin-top: auto;
+}
+
+.footer-logo-icon {
+  background-color: var(--primary);
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+}
+
+.footer-links-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.footer-links-list li {
+  margin-bottom: 0.75rem;
+}
+
+.footer-links-list a {
+  color: #94a3b8;
+  transition: color 0.15s ease-in-out, padding-left 0.15s ease-in-out;
+  display: inline-block;
+}
+
+.footer-links-list a:hover {
+  color: var(--secondary);
+  padding-left: 4px;
+}
+
+.footer-col-title {
+  position: relative;
+  padding-bottom: 0.5rem;
+}
+
+.footer-col-title::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 24px;
+  height: 2px;
+  background-color: var(--primary);
+}
+
+.contact-info .border-top {
+  border-top: 1px solid #334155;
+  margin-top: 0.75rem;
+}
+
+.footer-bottom {
+  border-top: 1px solid #1e293b;
+  color: #64748b;
+}
+
+@media (max-width: 768px) {
+  .footer-top.grid {
+    grid-template-columns: 1fr;
+    gap: 2rem;
+    padding-top: 2rem;
+    padding-bottom: 2rem;
+  }
+}

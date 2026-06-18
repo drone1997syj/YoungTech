@@ -1,0 +1,12 @@
+.app-wrapper {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background-color: var(--bg);
+  color: var(--text);
+}
+
+.main-content {
+  flex-grow: 1;
+  width: 100%;
+}

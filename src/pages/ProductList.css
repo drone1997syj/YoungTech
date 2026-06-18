@@ -1,0 +1,103 @@
+.product-list-layout {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  gap: 2rem;
+  align-items: start;
+}
+
+.list-sidebar {
+  position: sticky;
+  top: 100px;
+  background-color: var(--white);
+  border: 1px solid var(--border);
+}
+
+.sidebar-title {
+  border-bottom: 2px solid var(--border);
+  padding-bottom: 0.5rem;
+}
+
+.sidebar-cat-btn {
+  background: none;
+  border: none;
+  text-align: left;
+  padding: 0.625rem 0.875rem;
+  border-radius: var(--radius-md);
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text);
+  cursor: pointer;
+  transition: all 0.15s ease-in-out;
+}
+
+.sidebar-cat-btn:hover {
+  background-color: var(--bg-soft);
+  color: var(--primary);
+  padding-left: 1.125rem;
+}
+
+.sidebar-cat-btn.active {
+  background-color: var(--primary);
+  color: var(--white);
+  padding-left: 1.125rem;
+}
+
+.sidebar-info-box {
+  border-left: 3px solid var(--primary);
+  line-height: 1.4;
+}
+
+.list-product-card {
+  height: 390px;
+  display: flex;
+  flex-direction: column;
+}
+
+.list-product-img {
+  height: 180px;
+  overflow: hidden;
+  position: relative;
+  background-color: var(--bg-soft);
+  border-bottom: 1px solid var(--border);
+}
+
+.list-product-img img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.3s ease;
+}
+
+.list-product-card:hover .list-product-img img {
+  transform: scale(1.05);
+}
+
+.list-product-body {
+  flex: 1;
+}
+
+.product-short-desc {
+  line-height: 1.4;
+  height: 34px;
+  overflow: hidden;
+}
+
+.compare-active {
+  background-color: var(--warning);
+  color: var(--white) !important;
+  border-color: var(--warning) !important;
+}
+
+.no-products {
+  border: 1px solid var(--border);
+}
+
+@media (max-width: 992px) {
+  .product-list-layout {
+    grid-template-columns: 1fr;
+  }
+  
+  .list-sidebar {
+    position: static;
+  }
+}

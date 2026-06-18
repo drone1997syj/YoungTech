@@ -1,0 +1,117 @@
+.product-compare-section {
+  background-color: var(--white);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  box-shadow: var(--shadow-md);
+  border: 1px solid var(--border);
+}
+
+.compare-header {
+  background-color: rgba(124, 58, 237, 0.04);
+  transition: background-color 0.2s ease;
+}
+
+.compare-header:hover {
+  background-color: rgba(124, 58, 237, 0.08);
+}
+
+.compare-body {
+  max-width: 100%;
+}
+
+.compare-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.compare-table th, .compare-table td {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.spec-label-col {
+  width: 180px;
+  min-width: 150px;
+  background-color: var(--bg-soft);
+  color: var(--text-dark);
+  font-weight: 700;
+  font-size: 0.875rem;
+}
+
+.product-data-col {
+  width: calc((100% - 180px) / 3);
+  min-width: 200px;
+  background-color: var(--white);
+}
+
+.compare-product-info {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.compare-remove-btn {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  background-color: var(--bg-soft);
+  border: 1px solid var(--border);
+  color: var(--text-light);
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-full);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s ease-in-out;
+}
+
+.compare-remove-btn:hover {
+  background-color: var(--danger);
+  color: var(--white);
+  border-color: var(--danger);
+}
+
+.compare-prod-img {
+  width: 80px;
+  height: 80px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+
+.compare-prod-title {
+  height: 32px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  line-height: 1.3;
+}
+
+.spec-label {
+  background-color: var(--bg-soft);
+  font-weight: 600;
+  font-size: 0.8125rem;
+  color: var(--text-dark);
+  border-right: 1px solid var(--border);
+}
+
+.spec-val {
+  font-size: 0.8125rem;
+  color: var(--text);
+  line-height: 1.4;
+}
+
+.compare-table tbody tr:hover td {
+  background-color: rgba(124, 58, 237, 0.02);
+}
+
+.compare-table tbody tr:hover .spec-label {
+  background-color: var(--border);
+}

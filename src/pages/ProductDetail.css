@@ -1,0 +1,117 @@
+.back-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  transition: color 0.15s ease-in-out;
+}
+
+.back-btn:hover {
+  color: var(--primary);
+}
+
+.detail-layout {
+  border: 1px solid var(--border);
+}
+
+.detail-img-box {
+  height: 420px;
+  border: 1px solid var(--border);
+  background: linear-gradient(135deg, rgba(124, 58, 237, 0.02), rgba(167, 139, 250, 0.05));
+}
+
+.detail-img {
+  max-width: 90%;
+  max-height: 90%;
+  object-fit: contain;
+}
+
+.detail-order-info {
+  padding-left: 1rem;
+}
+
+.detail-purchase-box {
+  background-color: var(--bg-soft);
+  padding: 1.5rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+}
+
+.qty-counter {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background-color: var(--white);
+}
+
+.qty-btn {
+  background: none;
+  border: none;
+  width: 36px;
+  height: 36px;
+  font-size: 1.125rem;
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--text-dark);
+  transition: background-color 0.15s ease;
+}
+
+.qty-btn:hover {
+  background-color: var(--bg-soft);
+}
+
+.qty-input {
+  width: 48px;
+  height: 36px;
+  border: none;
+  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: var(--text-dark);
+}
+
+.qty-input::-webkit-outer-spin-button,
+.qty-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* Detail Spec Table */
+.spec-table-detail {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 1rem;
+}
+
+.spec-table-detail td {
+  padding: 0.875rem 1.25rem;
+  border: 1px solid var(--border);
+}
+
+.spec-key-col {
+  width: 200px;
+  font-weight: 700;
+}
+
+.spec-val-col {
+  line-height: 1.5;
+}
+
+/* Detail Consultation Banner */
+.detail-consult-banner {
+  background: linear-gradient(135deg, #1e1b4b 0%, #312e81 100%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+@media (max-width: 768px) {
+  .detail-layout {
+    grid-template-columns: 1fr;
+    padding: 1.5rem;
+  }
+  
+  .detail-order-info {
+    padding-left: 0;
+    margin-top: 2rem;
+  }
+}
