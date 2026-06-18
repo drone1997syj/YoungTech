@@ -362,9 +362,6 @@ export default function MyPage() {
     if (order.tax_document_type === 'cash_receipt') {
       return '현금 결제 증빙으로 현금영수증 발급 대상입니다.';
     }
-    if (order.payment_card_type === 'corporate') {
-      return '법인카드 결제 건은 카드 매출전표가 증빙으로 발급되며, 세금계산서는 중복 발급되지 않습니다.';
-    }
     return '카드 결제 건은 카드 매출전표가 증빙으로 발급되며, 세금계산서는 중복 발급되지 않습니다.';
   };
 

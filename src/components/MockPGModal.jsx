@@ -20,7 +20,6 @@ export default function MockPGModal({
   const [cardNum4, setCardNum4] = useState('');
   const [expiry, setExpiry] = useState('');
   const [cvc, setCvc] = useState('');
-  const [cardType, setCardType] = useState('personal');
   const [scenario, setScenario] = useState('success');
   const [isProcessing, setIsProcessing] = useState(false);
   const [paymentResult, setPaymentResult] = useState(null);
@@ -71,12 +70,10 @@ export default function MockPGModal({
         })),
         address: `[${recipientName}] ${shippingAddress} (연락처: ${contactPhone})`,
         payment_method: 'mock_card',
-        payment_card_type: cardType,
+        payment_card_type: 'card',
         tax_document_type: 'card_receipt',
         tax_document_status: 'issued_by_pg',
-        tax_note: cardType === 'corporate'
-          ? '법인카드 결제 건으로 카드 매출전표가 증빙으로 발급됩니다. 세금계산서는 중복 발급하지 않습니다.'
-          : '개인카드 결제 건으로 카드 매출전표가 증빙으로 발급됩니다. 세금계산서는 중복 발급하지 않습니다.'
+        tax_note: '카드 결제 건은 카드 매출전표가 증빙으로 발급됩니다. 같은 거래에 세금계산서는 중복 발급하지 않습니다.'
       };
 
       const res = await createOrder(orderData);
@@ -137,7 +134,7 @@ export default function MockPGModal({
                 </div>
                 <div className="receipt-row flex justify-between mb-2">
                   <span className="text-light">결제수단:</span>
-                  <span className="font-semibold text-dark">{cardType === 'corporate' ? '법인카드' : '개인카드'} (모의)</span>
+                  <span className="font-semibold text-dark">카드 결제 (모의)</span>
                 </div>
                 <div className="receipt-row flex justify-between mb-2">
                   <span className="text-light">증빙:</span>
@@ -176,32 +173,9 @@ export default function MockPGModal({
                   <span>증빙 처리 안내</span>
                 </div>
                 <p>
-                  신용카드 및 법인카드 결제 건은 카드 매출전표가 증빙으로 발급됩니다.
+                  카드 결제 건은 카드 매출전표가 증빙으로 발급됩니다.
                   같은 거래에 세금계산서는 중복 발급하지 않습니다.
                 </p>
-              </div>
-
-              <div className="card-type-toggle">
-                <label className={cardType === 'personal' ? 'active' : ''}>
-                  <input
-                    type="radio"
-                    name="cardType"
-                    value="personal"
-                    checked={cardType === 'personal'}
-                    onChange={(e) => setCardType(e.target.value)}
-                  />
-                  개인카드
-                </label>
-                <label className={cardType === 'corporate' ? 'active' : ''}>
-                  <input
-                    type="radio"
-                    name="cardType"
-                    value="corporate"
-                    checked={cardType === 'corporate'}
-                    onChange={(e) => setCardType(e.target.value)}
-                  />
-                  법인카드
-                </label>
               </div>
 
               <div className="form-group">
