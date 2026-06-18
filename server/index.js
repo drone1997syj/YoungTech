@@ -188,12 +188,12 @@ const deriveOrderStatusFromItems = (items, fallbackStatus = 'pending') => {
 
   const completedStatus = ['cancelled', 'returned', 'exchanged', 'refunded', 'confirmed']
     .find(status => statuses.includes(status));
-  if (completedStatus) return `part_${completedStatus}`;
 
   if (statuses.includes('shipping')) return 'shipping';
   if (statuses.includes('delivered')) return 'delivered';
   if (statuses.includes('preparing')) return 'preparing';
   if (statuses.includes('pending')) return 'pending';
+  if (completedStatus) return `part_${completedStatus}`;
 
   return fallbackStatus;
 };
@@ -2100,11 +2100,16 @@ app.put('/api/orders/:id/status', requireAdmin, async (req, res) => {
     } catch (e) {
       items = order.order_items || [];
     }
-    const updatedItems = items.map(item => ({ ...item, status }));
+    const terminalStatuses = ['cancelled', 'returned', 'refunded', 'exchanged', 'confirmed'];
+    const updatedItems = items.map(item => {
+      if (terminalStatuses.includes(item.status)) return item;
+      return { ...item, status };
+    });
+    const nextOrderStatus = deriveOrderStatusFromItems(updatedItems, status);
 
     await pool.query(
       'UPDATE orders SET status = ?, order_items = ? WHERE id = ?', 
-      [status, JSON.stringify(updatedItems), req.params.id]
+      [nextOrderStatus, JSON.stringify(updatedItems), req.params.id]
     );
     res.json({ message: `주문 상태가 '${status}'(으)로 업데이트되었습니다.` });
   } catch (error) {
@@ -2130,11 +2135,16 @@ app.put('/api/admin/orders/:id/delivery', requireAdmin, async (req, res) => {
     } catch (e) {
       items = order.order_items || [];
     }
-    const updatedItems = items.map(item => ({ ...item, status: 'shipping' }));
+    const updatedItems = items.map(item => {
+      const itemStatus = item.status || order.status;
+      if (['cancelled', 'returned', 'refunded', 'exchanged', 'confirmed'].includes(itemStatus)) return item;
+      return { ...item, status: 'shipping' };
+    });
+    const nextOrderStatus = deriveOrderStatusFromItems(updatedItems, 'shipping');
 
     await pool.query(
       'UPDATE orders SET carrier = ?, tracking_number = ?, status = ?, order_items = ? WHERE id = ?',
-      [carrier, tracking_number, 'shipping', JSON.stringify(updatedItems), req.params.id]
+      [carrier, tracking_number, nextOrderStatus, JSON.stringify(updatedItems), req.params.id]
     );
     res.json({ success: true, message: '배송 정보가 성공적으로 등록되었으며, 배송 상태가 배송중으로 변경되었습니다.' });
   } catch (error) {
@@ -2155,11 +2165,17 @@ app.put('/api/admin/orders/:id/complete', requireAdmin, async (req, res) => {
     } catch (e) {
       items = order.order_items || [];
     }
-    const updatedItems = items.map(item => ({ ...item, status: 'delivered' }));
+    const updatedItems = items.map(item => {
+      const itemStatus = item.status || order.status;
+      if (['cancelled', 'returned', 'refunded', 'exchanged', 'confirmed'].includes(itemStatus)) return item;
+      if (itemStatus !== 'shipping') return item;
+      return { ...item, status: 'delivered' };
+    });
+    const nextOrderStatus = deriveOrderStatusFromItems(updatedItems, 'delivered');
 
     await pool.query(
       'UPDATE orders SET status = ?, order_items = ? WHERE id = ?', 
-      ['delivered', JSON.stringify(updatedItems), req.params.id]
+      [nextOrderStatus, JSON.stringify(updatedItems), req.params.id]
     );
     res.json({ success: true, message: '배송 완료 처리가 성공적으로 완료되었습니다.' });
   } catch (error) {

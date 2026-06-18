@@ -41,11 +41,13 @@ export default function AdminDashboard() {
   // Pagination State for Products List
   const [prodPage, setProdPage] = useState(1);
   const [prodFilter, setProdFilter] = useState('all');
+  const [prodSortField, setProdSortField] = useState('category');
+  const [prodSortDirection, setProdSortDirection] = useState('asc');
   const ITEMS_PER_PAGE = 20;
 
   useEffect(() => {
     setProdPage(1);
-  }, [prodFilter]);
+  }, [prodFilter, prodSortField, prodSortDirection]);
 
   // Category Selector / Creation Modal States
   const [showCategorySelector, setShowCategorySelector] = useState(false);
@@ -118,6 +120,22 @@ export default function AdminDashboard() {
     const typeLabel = order.claim_type === 'exchange' ? '교환 사유' : '환불 사유';
     const reasonTypeLabel = order.claim_reason_type === 'seller' ? '판매자 귀책' : '고객 사유';
     return { typeLabel, reasonTypeLabel, reason: order.claim_reason };
+  };
+
+  const getShippingControlState = (order) => {
+    const terminalStatuses = new Set(['cancelled', 'returned', 'refunded', 'exchanged', 'confirmed']);
+    const activeItems = (order?.order_items || []).filter(item => {
+      const itemStatus = item.status || order.status;
+      return !terminalStatuses.has(itemStatus);
+    });
+    const statuses = activeItems.map(item => item.status || order.status);
+
+    return {
+      hasActiveItems: activeItems.length > 0,
+      hasPendingItems: statuses.some(status => status === 'pending' || status === 'part_cancelled'),
+      hasPreparingItems: statuses.includes('preparing'),
+      hasShippingItems: statuses.includes('shipping')
+    };
   };
 
   const getTaxDocumentLabel = (order) => {
@@ -902,9 +920,48 @@ export default function AdminDashboard() {
                   ? products
                   : products.filter(p => p.category === prodFilter);
 
-                const totalPages = Math.ceil(filteredProducts.length / itemsPerPage);
+                const getProductCategoryName = (product) => {
+                  const category = categories.find(c => c.id === product.category);
+                  return category ? category.name : product.category || '';
+                };
+                const getProductSortValue = (product) => {
+                  switch (prodSortField) {
+                    case 'category':
+                      return getProductCategoryName(product);
+                    case 'name':
+                      return product.name || '';
+                    case 'price':
+                      return Number(product.price || 0);
+                    case 'stock':
+                      return Number(product.stock || 0);
+                    case 'created_at':
+                      return new Date(product.created_at || 0).getTime();
+                    case 'sort_order':
+                    default:
+                      return Number(product.sort_order || 0);
+                  }
+                };
+                const sortedProducts = [...filteredProducts].sort((a, b) => {
+                  const aValue = getProductSortValue(a);
+                  const bValue = getProductSortValue(b);
+                  let result = 0;
+
+                  if (typeof aValue === 'number' && typeof bValue === 'number') {
+                    result = aValue - bValue;
+                  } else {
+                    result = String(aValue).localeCompare(String(bValue), 'ko-KR', { numeric: true, sensitivity: 'base' });
+                  }
+
+                  if (result === 0) {
+                    result = String(a.name || '').localeCompare(String(b.name || ''), 'ko-KR', { numeric: true, sensitivity: 'base' });
+                  }
+
+                  return prodSortDirection === 'desc' ? -result : result;
+                });
+
+                const totalPages = Math.ceil(sortedProducts.length / itemsPerPage);
                 const startIndex = (prodPage - 1) * itemsPerPage;
-                const paginatedProducts = filteredProducts.slice(startIndex, startIndex + itemsPerPage);
+                const paginatedProducts = sortedProducts.slice(startIndex, startIndex + itemsPerPage);
 
                 const pageNumbers = [];
                 for (let i = 1; i <= totalPages; i++) {
@@ -981,6 +1038,31 @@ export default function AdminDashboard() {
                             <option value={100}>100개씩</option>
                           </select>
                         </div>
+
+                        <div className="flex items-center gap-2">
+                          <span className="text-2xs text-light font-bold">정렬 기준:</span>
+                          <select
+                            value={prodSortField}
+                            onChange={(e) => setProdSortField(e.target.value)}
+                            className="form-select text-2xs py-1 px-2 border rounded-lg bg-white"
+                            style={{ width: '120px' }}
+                          >
+                            <option value="category">카테고리별</option>
+                            <option value="created_at">등록일시별</option>
+                            <option value="name">이름별</option>
+                            <option value="stock">재고수량별</option>
+                            <option value="price">가격별</option>
+                            <option value="sort_order">수동 순서별</option>
+                          </select>
+                          <button
+                            type="button"
+                            onClick={() => setProdSortDirection(prev => (prev === 'asc' ? 'desc' : 'asc'))}
+                            className="btn btn-secondary py-1 px-2 text-2xs font-bold"
+                            title="정렬 방향 전환"
+                          >
+                            {prodSortDirection === 'asc' ? '오름차순' : '내림차순'}
+                          </button>
+                        </div>
                       </div>
 
                       <button onClick={() => setShowCategorySelector(true)} className="btn btn-primary py-2 px-3 text-xs flex items-center gap-1">
@@ -1031,12 +1113,13 @@ export default function AdminDashboard() {
                                 className="cursor-pointer"
                               />
                             </th>
-                            <th className="py-3 px-2" style={{ width: '120px' }}>순서 정렬</th>
-                            <th className="py-3 px-2">ID</th>
-                            <th className="py-3 px-2">상품명</th>
                             <th className="py-3 px-2">카테고리</th>
+                            <th className="py-3 px-2">상품명</th>
                             <th className="py-3 px-2">가격</th>
-                            <th className="py-3 px-2">재고</th>
+                            <th className="py-3 px-2">재고수량</th>
+                            <th className="py-3 px-2">등록일시</th>
+                            <th className="py-3 px-2">ID</th>
+                            <th className="py-3 px-2" style={{ width: '120px' }}>순서 정렬</th>
                             <th className="py-3 px-2 text-center">관리</th>
                           </tr>
                         </thead>
@@ -1047,7 +1130,7 @@ export default function AdminDashboard() {
                               const categoryName = catObj ? catObj.name : p.category;
                               
                               // Find index in current filtered product list for up/down swapping
-                              const globalIndex = filteredProducts.findIndex(item => item.id === p.id);
+                              const globalIndex = sortedProducts.findIndex(item => item.id === p.id);
 
                               return (
                                 <tr key={p.id} className="border-b text-sm text-dark hover:bg-slate-50">
@@ -1059,6 +1142,18 @@ export default function AdminDashboard() {
                                       className="cursor-pointer w-4 h-4"
                                     />
                                   </td>
+                                  <td className="py-3 px-2"><span className="badge badge-purple text-xs px-2 py-0.5">{categoryName}</span></td>
+                                  <td className="py-3 px-2 font-bold text-base">{p.name}</td>
+                                  <td className="py-3 px-2 font-bold text-base">{p.price.toLocaleString()}원</td>
+                                  <td className="py-3 px-2 text-base">
+                                    {p.stock === 0 ? (
+                                      <span className="badge badge-red text-xs px-2 py-0.5 font-extrabold">품절</span>
+                                    ) : (
+                                      <span className="font-semibold">{p.stock}개</span>
+                                    )}
+                                  </td>
+                                  <td className="py-3 px-2 text-xs text-light">{p.created_at ? formatOrderDateTime(p.created_at) : '-'}</td>
+                                  <td className="py-3 px-2 font-mono font-bold text-light text-xs">{p.id}</td>
                                   <td className="py-3 px-2">
                                     <div className="flex items-center gap-1.5">
                                       <input
@@ -1070,7 +1165,7 @@ export default function AdminDashboard() {
                                       />
                                       <div className="order-btn-group">
                                         <button 
-                                          onClick={() => handleProductMoveUp(p, globalIndex, filteredProducts)}
+                                          onClick={() => handleProductMoveUp(p, globalIndex, sortedProducts)}
                                           disabled={globalIndex === 0}
                                           className="order-btn"
                                           title="위로 이동"
@@ -1079,27 +1174,16 @@ export default function AdminDashboard() {
                                           ▲
                                         </button>
                                         <button 
-                                          onClick={() => handleProductMoveDown(p, globalIndex, filteredProducts)}
-                                          disabled={globalIndex === filteredProducts.length - 1}
+                                          onClick={() => handleProductMoveDown(p, globalIndex, sortedProducts)}
+                                          disabled={globalIndex === sortedProducts.length - 1}
                                           className="order-btn"
                                           title="아래로 이동"
-                                          style={{ opacity: globalIndex === filteredProducts.length - 1 ? 0.3 : 1 }}
+                                          style={{ opacity: globalIndex === sortedProducts.length - 1 ? 0.3 : 1 }}
                                         >
                                           ▼
                                         </button>
                                       </div>
                                     </div>
-                                  </td>
-                                  <td className="py-3 px-2 font-mono font-bold text-light text-xs">{p.id}</td>
-                                  <td className="py-3 px-2 font-bold text-base">{p.name}</td>
-                                  <td className="py-3 px-2"><span className="badge badge-purple text-xs px-2 py-0.5">{categoryName}</span></td>
-                                  <td className="py-3 px-2 font-bold text-base">{p.price.toLocaleString()}원</td>
-                                  <td className="py-3 px-2 text-base">
-                                    {p.stock === 0 ? (
-                                      <span className="badge badge-red text-xs px-2 py-0.5 font-extrabold">품절</span>
-                                    ) : (
-                                      <span className="font-semibold">{p.stock}개</span>
-                                    )}
                                   </td>
                                   <td className="py-3 px-2 text-center flex justify-center items-center gap-2">
                                     <button 
@@ -1121,7 +1205,7 @@ export default function AdminDashboard() {
                             })
                           ) : (
                             <tr>
-                              <td colSpan="8" className="text-center py-6 text-sm text-light">해당 분류의 등록된 상품이 없습니다.</td>
+                              <td colSpan="9" className="text-center py-6 text-sm text-light">해당 분류의 등록된 상품이 없습니다.</td>
                             </tr>
                           )}
                         </tbody>
@@ -1282,13 +1366,14 @@ export default function AdminDashboard() {
                             <td className="py-4 px-2.5">
                               {(() => {
                                 const claimReason = getClaimReasonLabel(o);
+                                const shippingState = getShippingControlState(o);
                                 return (
                                   <>
                               {/* 종합 대표 상태 배지 노출 및 배송관리 기능 */}
-                              {o.status === 'pending' && (
+                              {(o.status === 'pending' || (o.status === 'part_cancelled' && shippingState.hasPendingItems)) && (
                                 <div className="flex flex-col gap-1.5">
                                   <span className="badge badge-purple text-xs px-2 py-1 text-center font-bold" style={{ display: 'inline-block', width: 'fit-content' }}>
-                                    결제완료 (배송대기)
+                                    {o.status === 'part_cancelled' ? '부분취소 후 배송대기' : '결제완료 (배송대기)'}
                                   </span>
                                   <button 
                                     onClick={() => handleStatusChange(o.id, 'preparing')}
@@ -1299,7 +1384,7 @@ export default function AdminDashboard() {
                                 </div>
                               )}
 
-                              {o.status === 'preparing' && (
+                              {(o.status === 'preparing' || (o.status === 'part_cancelled' && shippingState.hasPreparingItems)) && (
                                 <div className="flex flex-col gap-2.5 p-3 bg-slate-50 border rounded-xl" style={{ minWidth: '200px' }}>
                                   <span className="badge badge-orange text-2xs font-extrabold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5" style={{ width: 'fit-content' }}>
                                     배송준비중
@@ -1355,7 +1440,7 @@ export default function AdminDashboard() {
                                 </div>
                               )}
 
-                              {o.status === 'shipping' && (
+                              {(o.status === 'shipping' || (o.status === 'part_cancelled' && shippingState.hasShippingItems)) && (
                                 <div className="flex flex-col gap-1.5">
                                   <span className="badge badge-blue text-xs px-2 py-1 text-center font-bold" style={{ display: 'inline-block', width: 'fit-content', backgroundColor: '#eff6ff', color: '#2563eb', border: '1px solid #bfdbfe' }}>
                                     배송 중
@@ -1404,7 +1489,7 @@ export default function AdminDashboard() {
                                 </span>
                               )}
 
-                              {o.status === 'part_cancelled' && (
+                              {o.status === 'part_cancelled' && !shippingState.hasActiveItems && (
                                 <span className="badge text-xs px-2 py-1 text-center font-bold" style={{ display: 'inline-block', width: 'fit-content', backgroundColor: '#ffe4e6', color: '#e11d48', border: '1px solid #fecdd3' }}>
                                   부분 취소완료
                                 </span>
