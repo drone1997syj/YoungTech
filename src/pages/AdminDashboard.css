@@ -570,3 +570,26 @@
     grid-template-columns: 1fr;
   }
 }
+.tax-proof-admin-chip {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.45rem 0.65rem;
+  border: 1px solid #bfdbfe;
+  border-radius: 0.7rem;
+  background: #eff6ff;
+  color: #1d4ed8;
+  min-width: 92px;
+}
+
+.tax-proof-admin-chip strong {
+  font-size: 0.74rem;
+  font-weight: 900;
+  color: #1e40af;
+}
+
+.tax-proof-admin-chip span {
+  font-size: 0.62rem;
+  font-weight: 800;
+  color: #64748b;
+}

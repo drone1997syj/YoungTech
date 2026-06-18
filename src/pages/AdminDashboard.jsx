@@ -1266,6 +1266,17 @@ export default function AdminDashboard() {
                               </div>
                             </td>
                             <td className="py-4 px-2.5 font-bold text-primary text-base">{o.total_amount.toLocaleString()}원</td>
+                            <td className="py-4 px-2.5">
+                              <div className="tax-proof-admin-chip">
+                                <strong>{getTaxDocumentLabel(o)}</strong>
+                                <span>{getTaxDocumentStatusLabel(o)}</span>
+                              </div>
+                              {o.tax_invoice_required ? (
+                                <div className="text-3xs text-red-600 font-bold mt-1">세금계산서 확인 필요</div>
+                              ) : (
+                                <div className="text-3xs text-slate-400 mt-1">세금계산서 대상 아님</div>
+                              )}
+                            </td>
                             <td className="py-4 px-2.5 max-w-xs truncate text-xs" title="상세 배송지는 고객정보창에서 확인할 수 있습니다.">{maskText(o.address)}</td>
                             <td className="py-4 px-2.5">
                               {(() => {
