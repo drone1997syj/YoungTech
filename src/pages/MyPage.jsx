@@ -23,6 +23,16 @@ export default function MyPage() {
   const [editPhone, setEditPhone] = useState('');
   const [editAddress, setEditAddress] = useState('');
 
+  // Claim Modal State
+  const [showClaimModal, setShowClaimModal] = useState(false);
+  const [claimOrder, setClaimOrder] = useState(null);
+  const [claimType, setClaimType] = useState('return'); // 'return', 'exchange', or 'refund'
+  const [claimReason, setClaimReason] = useState('단순변심/고객과실');
+  const [customReason, setCustomReason] = useState('');
+  const [claimReasonType, setClaimReasonType] = useState('buyer'); // 'buyer' or 'seller'
+  const [claimPickupType, setClaimPickupType] = useState('pickup'); // 'pickup' or 'self'
+  const [claimProductId, setClaimProductId] = useState(null);
+
   const loadUserOrders = async () => {
     setLoading(true);
     const data = await fetchOrders();
@@ -40,15 +50,6 @@ export default function MyPage() {
   }, [user]);
 
   if (!user) return null;
-
-  // Claim Modal State
-  const [showClaimModal, setShowClaimModal] = useState(false);
-  const [claimOrder, setClaimOrder] = useState(null);
-  const [claimType, setClaimType] = useState('return'); // 'return' or 'exchange'
-  const [claimReason, setClaimReason] = useState('단순변심/고객과실');
-  const [customReason, setCustomReason] = useState('');
-  const [claimReasonType, setClaimReasonType] = useState('buyer'); // 'buyer' or 'seller'
-  const [claimPickupType, setClaimPickupType] = useState('pickup'); // 'pickup' or 'self'
 
   // 내정보 수정 클릭 시 비밀번호 검증 모달을 띄우지 않고 바로 프로필 수정 폼 로드 (테스트 목적 스킵)
   const handleOpenEditProfile = () => {
@@ -199,8 +200,6 @@ export default function MyPage() {
     setSelectedOrderForSimulator(order);
     setShowSimulator(true);
   };
-
-  const [claimProductId, setClaimProductId] = useState(null);
 
   const handleConfirmPurchase = async (orderId, productId) => {
     if (!window.confirm('구매확정 처리를 하시겠습니까? 완료 후에는 반품/교환 신청이 불가합니다.')) return;
