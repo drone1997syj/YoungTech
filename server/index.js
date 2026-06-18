@@ -904,7 +904,8 @@ app.post('/api/auth/kakao', async (req, res) => {
     return res.status(400).json({ message: '인가 코드가 누락되었습니다.' });
   }
 
-  const clientId = process.env.KAKAO_CLIENT_ID || process.env.VITE_KAKAO_CLIENT_ID;
+  const clientId = (process.env.KAKAO_CLIENT_ID || process.env.VITE_KAKAO_CLIENT_ID || '').trim();
+  const clientSecret = (process.env.KAKAO_CLIENT_SECRET || '').trim();
 
   let kakaoUser = null;
   const isMock = code === 'kakao_mock_code_test' || !clientId;
@@ -919,13 +920,17 @@ app.post('/api/auth/kakao', async (req, res) => {
   } else {
     try {
       const tokenUrl = 'https://kauth.kakao.com/oauth/token';
-      const redirectUri = `${req.headers.origin || 'http://localhost:5174'}/oauth/callback/kakao`;
+      const redirectBaseUrl = (req.headers.origin || process.env.PUBLIC_BASE_URL || getPublicBaseUrl(req)).replace(/\/$/, '');
+      const redirectUri = `${redirectBaseUrl}/oauth/callback/kakao`;
       
       const params = new URLSearchParams();
       params.append('grant_type', 'authorization_code');
-      params.append('client_id', process.env.KAKAO_CLIENT_ID);
+      params.append('client_id', clientId);
       params.append('redirect_uri', redirectUri);
       params.append('code', code);
+      if (clientSecret) {
+        params.append('client_secret', clientSecret);
+      }
 
       const tokenRes = await fetch(tokenUrl, {
         method: 'POST',
