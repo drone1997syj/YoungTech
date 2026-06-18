@@ -6,11 +6,14 @@ export const useShop = () => useContext(ShopContext);
 
 const getBackendBase = () => {
   const { hostname, protocol, port } = window.location;
-  if (hostname.includes('trycloudflare.com') || hostname.includes('loca.lt')) {
-    // External tunnel: backend serves both frontend and API on same origin
+  const isLocalHost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+
+  if (!isLocalHost || hostname.includes('trycloudflare.com') || hostname.includes('loca.lt')) {
+    // Public domain/tunnel: backend serves both frontend and API on same origin.
     return `${protocol}//${hostname}`;
   }
-  // Local: backend is on port 5000, frontend on 5174 (if port is empty, default to 5000 for backend)
+
+  // Local: backend is on port 5000, frontend on 5174/5173.
   const backendPort = (port === '5174' || port === '5173' || !port) ? '5000' : port;
   return `${protocol}//${hostname}:${backendPort}`;
 };
