@@ -8,6 +8,7 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
+    "start": "npm --prefix server install --omit=dev && npm --prefix server start",
     "test:smoke": "node scripts/smoke-test.mjs"
   },
   "dependencies": {
