@@ -5,6 +5,11 @@ const ShopContext = createContext();
 export const useShop = () => useContext(ShopContext);
 
 const getBackendBase = () => {
+  const configuredBase = import.meta.env.VITE_API_BASE_URL?.trim();
+  if (configuredBase) {
+    return configuredBase.replace(/\/$/, '');
+  }
+
   const { hostname, protocol, port } = window.location;
   const isLocalHost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
 
