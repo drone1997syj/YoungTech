@@ -550,6 +550,13 @@ const sanitizeUser = (user) => ({
   role: user.role
 });
 
+const getDisplayNameFromProfile = (name, email) => {
+  const trimmedName = String(name || '').trim();
+  if (trimmedName) return trimmedName;
+  const emailPrefix = String(email || '').split('@')[0]?.trim();
+  return emailPrefix || '고객';
+};
+
 const createSocialLinkToken = ({ provider, providerUserId, email }) => jwt.sign(
   { type: 'social_link', provider, providerUserId, email },
   JWT_SECRET,
@@ -782,7 +789,7 @@ app.post('/api/auth/naver', async (req, res) => {
     naverUser = {
       id: 'naver_mock_fixed_user_id',
       email: process.env.NAVER_MOCK_EMAIL || 'drone1997@naver.com',
-      name: '',
+      name: getDisplayNameFromProfile('', process.env.NAVER_MOCK_EMAIL || 'drone1997@naver.com'),
       emailVerified: true
     };
   } else {
@@ -807,7 +814,7 @@ app.post('/api/auth/naver', async (req, res) => {
       naverUser = {
         id: profileData.response.id,
         email: profileData.response.email,
-        name: profileData.response.name || '',
+        name: getDisplayNameFromProfile(profileData.response.name, profileData.response.email),
         emailVerified: Boolean(profileData.response.email)
       };
     } catch (err) {
@@ -946,7 +953,7 @@ app.post('/api/auth/kakao', async (req, res) => {
       kakaoUser = {
         id: String(profileData.id),
         email: profileData.kakao_account?.email || `kakao_${profileData.id}@kakao.com`,
-        name: profileData.properties?.nickname || '',
+        name: getDisplayNameFromProfile(profileData.properties?.nickname, profileData.kakao_account?.email || `kakao_${profileData.id}@kakao.com`),
         emailVerified: profileData.kakao_account?.is_email_verified !== false && Boolean(profileData.kakao_account?.email)
       };
     } catch (err) {
@@ -1053,7 +1060,7 @@ app.post('/api/auth/google', async (req, res) => {
       googleUser = {
         id: tokenInfo.sub || tokenInfo.user_id || tokenInfo.id || tokenInfo.email,
         email: tokenInfo.email,
-        name: tokenInfo.name || tokenInfo.given_name || '',
+        name: getDisplayNameFromProfile(tokenInfo.name || tokenInfo.given_name, tokenInfo.email),
         emailVerified: tokenInfo.email_verified === true || tokenInfo.email_verified === 'true'
       };
     } catch (err) {
@@ -1064,7 +1071,7 @@ app.post('/api/auth/google', async (req, res) => {
     googleUser = {
       id: 'google_mock_fixed_user_id',
       email: 'google_test_fixed_user@gmail.com',
-      name: '',
+      name: getDisplayNameFromProfile('', 'google_test_fixed_user@gmail.com'),
       emailVerified: true
     };
   } else {
@@ -1114,7 +1121,7 @@ app.post('/api/auth/google', async (req, res) => {
       googleUser = {
         id: profileData.id,
         email: profileData.email,
-        name: profileData.name || '',
+        name: getDisplayNameFromProfile(profileData.name, profileData.email),
         emailVerified: profileData.verified_email !== false
       };
     } catch (err) {

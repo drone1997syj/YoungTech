@@ -19,6 +19,7 @@ export default function Header() {
   const [searchInput, setSearchInput] = useState('');
 
   const cartCount = cart.reduce((sum, item) => sum + item.quantity, 0);
+  const displayName = user?.name?.trim() || user?.email?.split('@')[0] || '고객';
 
   const handleSearchSubmit = (e) => {
     e.preventDefault();
@@ -43,7 +44,7 @@ export default function Header() {
           <div className="top-bar-links flex gap-4 text-white">
             {user ? (
               <>
-                <span className="user-welcome"><b>{user.name}</b>님 환영합니다</span>
+                <span className="user-welcome"><b>{displayName}</b>님 환영합니다</span>
                 {user.role === 'admin' && (
                   <button onClick={() => navigate('admin')} className="top-link-btn font-bold text-yellow-300" style={{ color: '#fbbf24', fontWeight: 'bold' }}>★ 관리자 모드</button>
                 )}

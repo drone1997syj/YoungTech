@@ -51,6 +51,8 @@ export default function MyPage() {
 
   if (!user) return null;
 
+  const displayName = user?.name?.trim() || user?.email?.split('@')[0] || '고객';
+
   // 내정보 수정 클릭 시 비밀번호 검증 모달을 띄우지 않고 바로 프로필 수정 폼 로드 (테스트 목적 스킵)
   const handleOpenEditProfile = () => {
     setEditName(user.name || '');
@@ -379,7 +381,7 @@ export default function MyPage() {
               <User size={22} />
             </div>
             <div>
-              <h4 className="font-extrabold text-dark text-base">{user.name} 님</h4>
+              <h4 className="font-extrabold text-dark text-base">{displayName} 님</h4>
               <span className="text-3xs text-light">영테크 공식 회원</span>
             </div>
           </div>
