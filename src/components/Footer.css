@@ -58,11 +58,39 @@
   color: #64748b;
 }
 
+.footer-business {
+  border-top: 1px solid #1e293b;
+  color: #94a3b8;
+  line-height: 1.8;
+  text-align: center;
+}
+
+.footer-business p {
+  margin: 0.15rem 0;
+}
+
+.footer-business b {
+  color: #cbd5e1;
+}
+
+.footer-business span {
+  color: #475569;
+  margin: 0 0.45rem;
+}
+
 @media (max-width: 768px) {
   .footer-top.grid {
     grid-template-columns: 1fr;
     gap: 2rem;
     padding-top: 2rem;
     padding-bottom: 2rem;
+  }
+
+  .footer-business {
+    text-align: left;
+  }
+
+  .footer-business span {
+    display: none;
   }
 }
