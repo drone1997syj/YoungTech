@@ -49,7 +49,7 @@
 주문, 결제, 배송 상태를 저장합니다.
 
 컬럼:
-`id, user_id, total_amount, order_items, address, carrier, tracking_number, status, confirmed_at, created_at`
+`id, user_id, total_amount, payment_method, payment_card_type, tax_document_type, tax_document_status, tax_invoice_required, tax_note, order_items, address, carrier, tracking_number, status, confirmed_at, created_at`
 
 주요 상태:
 `pending, preparing, shipping, delivered, confirmed, cancel_requested, cancelled, returning, returned, refunding, refunded, exchanging, exchanged, part_*`
@@ -58,6 +58,8 @@
 - `order_items`는 JSON입니다.
 - 상품별 상태가 포함될 수 있습니다.
 - 배송지는 개인정보라 관리자 목록에서는 마스킹하고, 상세 고객정보창에서만 완전 표시합니다.
+- 현재 직접 계좌이체/무통장 결제를 받지 않는 정책이므로 카드/법인카드 결제 주문은 `tax_document_type = card_receipt`, `tax_invoice_required = false`로 저장합니다.
+- 법인카드 결제도 카드 매출전표가 증빙이며, 같은 거래에 세금계산서는 중복 발급하지 않는 정책입니다.
 
 ### `claims`
 

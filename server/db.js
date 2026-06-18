@@ -265,6 +265,30 @@ export async function initDb() {
       await connection.query(`ALTER TABLE orders ADD COLUMN confirmed_at TIMESTAMP DEFAULT NULL AFTER status`);
       console.log('Added confirmed_at column to orders table.');
     }
+    if (!columnNames.includes('payment_method')) {
+      await connection.query(`ALTER TABLE orders ADD COLUMN payment_method VARCHAR(50) DEFAULT 'mock_card' AFTER total_amount`);
+      console.log('Added payment_method column to orders table.');
+    }
+    if (!columnNames.includes('payment_card_type')) {
+      await connection.query(`ALTER TABLE orders ADD COLUMN payment_card_type VARCHAR(50) DEFAULT 'personal' AFTER payment_method`);
+      console.log('Added payment_card_type column to orders table.');
+    }
+    if (!columnNames.includes('tax_document_type')) {
+      await connection.query(`ALTER TABLE orders ADD COLUMN tax_document_type VARCHAR(50) DEFAULT 'card_receipt' AFTER payment_card_type`);
+      console.log('Added tax_document_type column to orders table.');
+    }
+    if (!columnNames.includes('tax_document_status')) {
+      await connection.query(`ALTER TABLE orders ADD COLUMN tax_document_status VARCHAR(50) DEFAULT 'issued_by_pg' AFTER tax_document_type`);
+      console.log('Added tax_document_status column to orders table.');
+    }
+    if (!columnNames.includes('tax_invoice_required')) {
+      await connection.query(`ALTER TABLE orders ADD COLUMN tax_invoice_required BOOLEAN DEFAULT FALSE AFTER tax_document_status`);
+      console.log('Added tax_invoice_required column to orders table.');
+    }
+    if (!columnNames.includes('tax_note')) {
+      await connection.query(`ALTER TABLE orders ADD COLUMN tax_note TEXT NULL AFTER tax_invoice_required`);
+      console.log('Added tax_note column to orders table.');
+    }
 
     // 7. claims table (Refund & Exchange)
     await connection.query(`

@@ -352,6 +352,21 @@ export default function MyPage() {
     }
   };
 
+  const getTaxDocumentLabel = (order) => {
+    if (order.tax_document_type === 'cash_receipt') return '현금영수증';
+    return '카드 매출전표';
+  };
+
+  const getTaxDocumentDescription = (order) => {
+    if (order.tax_document_type === 'cash_receipt') {
+      return '현금 결제 증빙으로 현금영수증 발급 대상입니다.';
+    }
+    if (order.payment_card_type === 'corporate') {
+      return '법인카드 결제 건은 카드 매출전표가 증빙으로 발급되며, 세금계산서는 중복 발급되지 않습니다.';
+    }
+    return '카드 결제 건은 카드 매출전표가 증빙으로 발급되며, 세금계산서는 중복 발급되지 않습니다.';
+  };
+
   return (
     <>
       <div className="mypage-container container py-8 animate-fade-in">
@@ -632,6 +647,14 @@ export default function MyPage() {
                       )}
                     </div>
                   )}
+
+                  <div className="tax-proof-summary">
+                    <div>
+                      <span className="tax-proof-summary-label">증빙</span>
+                      <strong>{getTaxDocumentLabel(order)}</strong>
+                    </div>
+                    <p>{getTaxDocumentDescription(order)}</p>
+                  </div>
 
                   {/* Receipt Footer Pricing */}
                   <div className="receipt-footer flex justify-between items-center pt-4 border-t text-sm mt-3">

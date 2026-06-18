@@ -120,6 +120,16 @@ export default function AdminDashboard() {
     return { typeLabel, reasonTypeLabel, reason: order.claim_reason };
   };
 
+  const getTaxDocumentLabel = (order) => {
+    if (order?.tax_document_type === 'cash_receipt') return '현금영수증';
+    return '카드 매출전표';
+  };
+
+  const getTaxDocumentStatusLabel = (order) => {
+    if (order?.tax_document_type === 'cash_receipt') return '발급 대상';
+    return 'PG 전표';
+  };
+
   const openCustomerAuth = (customer) => {
     if (!customer?.id) return;
     const confirmed = window.confirm(

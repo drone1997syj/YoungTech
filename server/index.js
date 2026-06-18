@@ -1649,10 +1649,27 @@ app.post('/api/products/batch-out-of-stock', requireAdmin, async (req, res) => {
 // Orders APIs
 // ==========================================
 app.post('/api/orders', authenticateToken, async (req, res) => {
-  const { total_amount, order_items, address } = req.body;
+  const {
+    total_amount,
+    order_items,
+    address,
+    payment_method = 'mock_card',
+    payment_card_type = 'personal',
+    tax_document_type = 'card_receipt',
+    tax_document_status = 'issued_by_pg',
+    tax_note = ''
+  } = req.body;
   if (!total_amount || !order_items || !address) {
     return res.status(400).json({ message: '주문 정보가 누락되었습니다.' });
   }
+
+  const normalizedPaymentMethod = payment_method === 'mock_card' ? 'mock_card' : 'mock_card';
+  const normalizedCardType = payment_card_type === 'corporate' ? 'corporate' : 'personal';
+  const normalizedTaxType = tax_document_type === 'cash_receipt' ? 'cash_receipt' : 'card_receipt';
+  const normalizedTaxStatus = normalizedTaxType === 'card_receipt'
+    ? 'issued_by_pg'
+    : (tax_document_status || 'requested');
+  const taxInvoiceRequired = false;
 
   const orderId = 'ORD_' + Date.now();
   const connection = await pool.getConnection();
@@ -1666,8 +1683,23 @@ app.post('/api/orders', authenticateToken, async (req, res) => {
     }));
 
     await connection.query(
-      'INSERT INTO orders (id, user_id, total_amount, order_items, address, status) VALUES (?, ?, ?, ?, ?, ?)',
-      [orderId, req.user.id, total_amount, JSON.stringify(itemsWithStatus), address, 'pending']
+      `INSERT INTO orders
+       (id, user_id, total_amount, payment_method, payment_card_type, tax_document_type, tax_document_status, tax_invoice_required, tax_note, order_items, address, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        orderId,
+        req.user.id,
+        total_amount,
+        normalizedPaymentMethod,
+        normalizedCardType,
+        normalizedTaxType,
+        normalizedTaxStatus,
+        taxInvoiceRequired,
+        tax_note,
+        JSON.stringify(itemsWithStatus),
+        address,
+        'pending'
+      ]
     );
 
     // Update stock & Update analytics
