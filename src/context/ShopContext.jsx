@@ -268,11 +268,23 @@ export const ShopProvider = ({ children }) => {
 
   const register = async (email, password, name, phone) => {
     try {
-      await apiFetch('/auth/register', {
+      const data = await apiFetch('/auth/register', {
         method: 'POST',
         body: JSON.stringify({ email, password, name, phone })
       });
-      return { success: true };
+      return { success: true, ...data };
+    } catch (err) {
+      return { success: false, message: err.message };
+    }
+  };
+
+  const verifyRegisterEmail = async (verificationId, code) => {
+    try {
+      const data = await apiFetch('/auth/register/verify', {
+        method: 'POST',
+        body: JSON.stringify({ verificationId, code })
+      });
+      return { success: true, ...data };
     } catch (err) {
       return { success: false, message: err.message };
     }
@@ -731,6 +743,8 @@ export const ShopProvider = ({ children }) => {
       setChatOpen,
       loading,
       login,
+      register,
+      verifyRegisterEmail,
       logout,
       addToCart: handleAddToCart,
       updateQty: handleUpdateQty,

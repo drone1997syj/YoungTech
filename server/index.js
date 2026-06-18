@@ -226,6 +226,128 @@ function requireAdmin(req, res, next) {
 // ==========================================
 // Authentication APIs
 // ==========================================
+app.post('/api/auth/register', async (req, res, next) => {
+  const { email, password, name, phone } = req.body;
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+  const normalizedName = String(name || '').trim();
+  const normalizedPhone = String(phone || '').replace(/\D/g, '');
+
+  if (!normalizedEmail || !password || !normalizedName || !normalizedPhone) {
+    return res.status(400).json({ message: '이메일, 비밀번호, 이름, 휴대폰 번호를 모두 입력해 주세요.' });
+  }
+
+  if (!/^01\d{8,9}$/.test(normalizedPhone)) {
+    return res.status(400).json({ message: '휴대폰 번호를 올바르게 입력해 주세요. 예: 010-1234-5678' });
+  }
+
+  const passwordError = validatePasswordPolicy(password, { email: normalizedEmail, name: normalizedName });
+  if (passwordError) {
+    return res.status(400).json({ message: passwordError });
+  }
+
+  try {
+    const [existing] = await pool.query('SELECT * FROM users WHERE email = ?', [normalizedEmail]);
+    if (existing.length > 0) {
+      const existingUser = existing[0];
+      const hasSocialLogin = Boolean(existingUser.naver_id || existingUser.kakao_id || existingUser.google_id);
+      return res.status(400).json({
+        message: hasSocialLogin
+          ? '이미 간편로그인으로 가입된 이메일입니다. 일반 로그인도 사용하려면 비밀번호 찾기/재설정을 이용해 주세요.'
+          : '이미 가입된 이메일입니다. 로그인 또는 비밀번호 찾기를 이용해 주세요.'
+      });
+    }
+
+    const code = createUnlockCode();
+    const verificationId = crypto.randomUUID();
+    const hashedPassword = bcrypt.hashSync(password, 10);
+
+    await pool.query(
+      `INSERT INTO signup_email_verifications
+       (id, email, password_hash, name, phone, code_hash, failed_count, expires_at)
+       VALUES (?, ?, ?, ?, ?, ?, 0, DATE_ADD(NOW(), INTERVAL 10 MINUTE))`,
+      [verificationId, normalizedEmail, hashedPassword, normalizedName, normalizedPhone, bcrypt.hashSync(code, 10)]
+    );
+
+    const mailResult = await sendMail({
+      to: normalizedEmail,
+      subject: '[YoungTech] 회원가입 이메일 인증번호',
+      text: `YoungTech 회원가입 인증번호는 ${code} 입니다.\n\n인증번호는 10분 동안만 사용할 수 있으며, 5회 이상 틀리면 다시 가입 인증을 요청해야 합니다.\n본인이 요청하지 않았다면 이 메일을 무시해 주세요.`
+    });
+
+    return res.status(202).json({
+      message: '입력하신 이메일로 인증번호를 보냈습니다. 인증을 완료하면 회원가입이 완료됩니다.',
+      requiresEmailVerification: true,
+      verificationId,
+      maskedEmail: maskEmailForRecovery(normalizedEmail),
+      devVerificationCode: mailResult.devMode ? code : undefined
+    });
+  } catch (error) {
+    if (error?.code === 'ER_NO_SUCH_TABLE') {
+      return next(error);
+    }
+    console.error(error);
+    return res.status(500).json({ message: '서버 내부 오류' });
+  }
+});
+
+app.post('/api/auth/register/verify', async (req, res) => {
+  const { verificationId, code } = req.body;
+  const normalizedCode = String(code || '').replace(/\D/g, '');
+
+  if (!verificationId || normalizedCode.length !== 6) {
+    return res.status(400).json({ message: '이메일 인증번호 6자리를 입력해 주세요.' });
+  }
+
+  try {
+    const [rows] = await pool.query('SELECT * FROM signup_email_verifications WHERE id = ?', [verificationId]);
+    if (rows.length === 0) {
+      return res.status(404).json({ message: '가입 인증 정보를 찾을 수 없습니다. 회원가입을 다시 진행해 주세요.' });
+    }
+
+    const verification = rows[0];
+    if (verification.completed_at) {
+      return res.status(400).json({ message: '이미 처리된 가입 인증입니다. 로그인해 주세요.' });
+    }
+    if (new Date(verification.expires_at) <= new Date()) {
+      return res.status(400).json({ message: '인증번호 유효시간이 지났습니다. 회원가입을 다시 진행해 주세요.' });
+    }
+    if (Number(verification.failed_count || 0) >= 5) {
+      return res.status(429).json({ message: '인증번호 입력 실패가 5회를 초과했습니다. 회원가입 인증을 다시 요청해 주세요.' });
+    }
+
+    const isValidCode = bcrypt.compareSync(normalizedCode, verification.code_hash);
+    if (!isValidCode) {
+      const nextCount = Number(verification.failed_count || 0) + 1;
+      await pool.query('UPDATE signup_email_verifications SET failed_count = ? WHERE id = ?', [nextCount, verificationId]);
+      return res.status(400).json({
+        message: nextCount >= 5
+          ? '인증번호 입력 실패가 5회를 초과했습니다. 회원가입 인증을 다시 요청해 주세요.'
+          : `인증번호가 일치하지 않습니다. 남은 시도 횟수: ${5 - nextCount}회`,
+        failedCount: nextCount,
+        remainingAttempts: Math.max(0, 5 - nextCount)
+      });
+    }
+
+    const [existing] = await pool.query('SELECT id FROM users WHERE email = ?', [verification.email]);
+    if (existing.length > 0) {
+      await pool.query('UPDATE signup_email_verifications SET completed_at = NOW() WHERE id = ?', [verificationId]);
+      return res.status(409).json({ message: '이미 가입된 이메일입니다. 로그인 또는 비밀번호 찾기를 이용해 주세요.' });
+    }
+
+    const userId = `user_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+    await pool.query(
+      'INSERT INTO users (id, email, password, name, phone, role) VALUES (?, ?, ?, ?, ?, ?)',
+      [userId, verification.email, verification.password_hash, verification.name, verification.phone, 'user']
+    );
+    await pool.query('UPDATE signup_email_verifications SET completed_at = NOW() WHERE id = ?', [verificationId]);
+
+    return res.status(201).json({ message: '이메일 인증이 완료되어 회원가입이 완료되었습니다.' });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: '서버 내부 오류' });
+  }
+});
+
 app.post('/api/auth/register', async (req, res) => {
   const { email, password, name, phone } = req.body;
   const normalizedPhone = String(phone || '').replace(/\D/g, '');
