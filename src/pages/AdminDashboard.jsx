@@ -1176,6 +1176,7 @@ export default function AdminDashboard() {
                           <th className="py-4 px-2.5">결제액</th>
                           <th className="py-4 px-2.5">배송지</th>
                           <th className="py-4 px-2.5">배송 상태</th>
+                          <th className="py-4 px-2.5">처리 상태</th>
                         </tr>
                       </thead>
                       <tbody>
