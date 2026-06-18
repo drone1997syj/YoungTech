@@ -662,10 +662,6 @@ app.post('/api/auth/link-social', async (req, res) => {
       return res.status(401).json({ message: '영테크 비밀번호가 일치하지 않습니다.' });
     }
 
-    if (user[config.idColumn] && user[config.idColumn] !== payload.providerUserId) {
-      return res.status(409).json({ message: `이미 다른 ${config.label} 계정이 연결되어 있습니다.` });
-    }
-
     await pool.query(`UPDATE users SET ${config.idColumn} = ? WHERE id = ?`, [payload.providerUserId, user.id]);
     await pool.query(
       'INSERT INTO social_link_history (user_id, provider, provider_user_id, method, result) VALUES (?, ?, ?, ?, ?)',
@@ -743,10 +739,6 @@ app.post('/api/auth/link-social-email', async (req, res) => {
     const user = userRows[0];
     if (user.role === 'admin') {
       return res.status(403).json({ message: '관리자 계정은 이메일 인증만으로 간편로그인을 연결할 수 없습니다.' });
-    }
-
-    if (user[config.idColumn] && user[config.idColumn] !== verification.provider_user_id) {
-      return res.status(409).json({ message: `이미 다른 ${config.label} 계정이 연결되어 있습니다.` });
     }
 
     await pool.query(`UPDATE users SET ${config.idColumn} = ? WHERE id = ?`, [verification.provider_user_id, user.id]);
@@ -861,7 +853,12 @@ app.post('/api/auth/naver', async (req, res) => {
         });
       }
 
-      return res.status(409).json({ message: '이미 다른 네이버 계정이 연결된 이메일입니다.' });
+      return sendSocialLinkRequired(res, {
+        provider: 'naver',
+        providerUserId: naverUser.id,
+        user,
+        emailVerified: naverUser.emailVerified
+      });
     }
 
     const tempUserId = 'naver_' + Date.now();
