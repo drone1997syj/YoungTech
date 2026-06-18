@@ -506,6 +506,7 @@ export default function MyPage() {
                               {canRequestClaim(itemStatus) && (
                                 <>
                                   <button
+                                    type="button"
                                     onClick={() => handleConfirmPurchase(order.id, item.id)}
                                     className="btn btn-primary text-3xs py-1 px-2.5 font-bold"
                                     style={{ fontSize: '10px' }}
@@ -513,6 +514,7 @@ export default function MyPage() {
                                     구매확정
                                   </button>
                                   <button
+                                    type="button"
                                     onClick={() => handleOpenClaim(order, 'return', item.id)}
                                     className="btn text-3xs py-1 px-2 font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-300"
                                     style={{ fontSize: '10px' }}
@@ -520,6 +522,7 @@ export default function MyPage() {
                                     환불
                                   </button>
                                   <button
+                                    type="button"
                                     onClick={() => handleOpenClaim(order, 'exchange', item.id)}
                                     className="btn text-3xs py-1 px-2 font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-300"
                                     style={{ fontSize: '10px' }}
@@ -532,6 +535,7 @@ export default function MyPage() {
                               {/* 구매확정 상태 */}
                               {canRequestRefundAfterConfirm(itemStatus) && (
                                 <button
+                                  type="button"
                                   onClick={() => handleOpenClaim(order, 'refund', item.id)}
                                   className="btn text-3xs py-1 px-2.5 font-bold bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-300"
                                   style={{ fontSize: '10px' }}
@@ -692,8 +696,8 @@ export default function MyPage() {
 
     {/* 환불/교환 신청 모달 */}
     {showClaimModal && claimOrder && (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col p-6 border border-slate-200">
+      <div className="claim-modal-backdrop">
+        <div className="claim-modal-container">
           <div className="flex justify-between items-center pb-3 border-b mb-4">
             <h3 className="font-extrabold text-lg text-dark">
               {claimType === 'return' || claimType === 'refund' ? '환불' : '교환'}

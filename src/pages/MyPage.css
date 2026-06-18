@@ -215,6 +215,29 @@
   z-index: 1000;
 }
 
+.claim-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 2500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(15, 23, 42, 0.62);
+  backdrop-filter: blur(4px);
+}
+
+.claim-modal-container {
+  width: min(440px, 100%);
+  max-height: 90vh;
+  overflow-y: auto;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 18px;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.32);
+  padding: 24px;
+}
+
 .naver-edit-container {
   background-color: #f9f9fc;
   width: 440px;
