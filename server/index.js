@@ -590,6 +590,7 @@ const createSocialLinkVerification = async ({ provider, providerUserId, user }) 
 
 const sendSocialLinkRequired = async (res, { provider, providerUserId, user, emailVerified = false }) => {
   const config = SOCIAL_PROVIDER_CONFIG[provider];
+  const hasProviderConflict = Boolean(user[config.idColumn] && user[config.idColumn] !== providerUserId);
   const requiresPassword = user.role === 'admin' || !emailVerified;
 
   if (requiresPassword) {
@@ -605,6 +606,20 @@ const sendSocialLinkRequired = async (res, { provider, providerUserId, user, ema
       message: user.role === 'admin'
         ? '관리자 계정은 보안을 위해 기존 영테크 비밀번호 확인 후에만 간편로그인을 연결할 수 있습니다.'
         : '간편로그인 이메일 검증 상태를 확인할 수 없어 기존 영테크 비밀번호 확인이 필요합니다.'
+    });
+  }
+
+  if (!hasProviderConflict) {
+    return res.json({
+      success: false,
+      requiresAccountLink: true,
+      linkMethod: 'confirm',
+      provider,
+      providerLabel: config.label,
+      email: user.email,
+      maskedEmail: maskEmailForRecovery(user.email),
+      linkToken: createSocialLinkToken({ provider, providerUserId, email: user.email }),
+      message: `이미 영테크에 가입된 이메일입니다. 같은 이메일의 ${config.label} 계정을 기존 영테크 계정에 연결하면 앞으로 간편로그인도 사용할 수 있습니다.`
     });
   }
 
@@ -683,6 +698,63 @@ app.post('/api/auth/link-social', async (req, res) => {
       return res.status(401).json({ message: '계정 연결 요청 시간이 만료되었습니다. 간편로그인을 다시 시도해 주세요.' });
     }
     console.error('Social Link Error:', error);
+    return res.status(500).json({ message: '계정 연결 처리 중 오류가 발생했습니다.' });
+  }
+});
+
+app.post('/api/auth/link-social-confirm', async (req, res) => {
+  const { linkToken } = req.body;
+  if (!linkToken) {
+    return res.status(400).json({ message: '계정 연결 정보가 없습니다. 간편로그인을 다시 시도해 주세요.' });
+  }
+
+  try {
+    const payload = jwt.verify(linkToken, JWT_SECRET);
+    if (payload.type !== 'social_link') {
+      return res.status(400).json({ message: '유효하지 않은 계정 연결 요청입니다.' });
+    }
+
+    const config = SOCIAL_PROVIDER_CONFIG[payload.provider];
+    if (!config) {
+      return res.status(400).json({ message: '지원하지 않는 간편로그인 제공자입니다.' });
+    }
+
+    const [rows] = await pool.query('SELECT * FROM users WHERE email = ?', [payload.email]);
+    if (rows.length === 0) {
+      return res.status(404).json({ message: '연결할 영테크 계정을 찾을 수 없습니다.' });
+    }
+
+    const user = rows[0];
+    if (user.role === 'admin') {
+      return res.status(403).json({ message: '관리자 계정은 확인만으로 간편로그인을 연결할 수 없습니다. 비밀번호 확인이 필요합니다.' });
+    }
+
+    if (user[config.idColumn] && user[config.idColumn] !== payload.providerUserId) {
+      return res.status(409).json({ message: `이미 다른 ${config.label} 계정이 연결되어 있습니다. 이메일 인증을 다시 진행해 주세요.` });
+    }
+
+    await pool.query(`UPDATE users SET ${config.idColumn} = ? WHERE id = ?`, [payload.providerUserId, user.id]);
+    await pool.query(
+      'INSERT INTO social_link_history (user_id, provider, provider_user_id, method, result) VALUES (?, ?, ?, ?, ?)',
+      [user.id, payload.provider, payload.providerUserId, 'confirm', 'linked']
+    );
+
+    const [updatedRows] = await pool.query('SELECT * FROM users WHERE id = ?', [user.id]);
+    await sendMail({
+      to: updatedRows[0].email,
+      subject: '[YoungTech] 간편로그인 연결 완료 안내',
+      text: `${config.label} 간편로그인이 YoungTech 계정에 연결되었습니다.\n\n본인이 연결한 것이 아니라면 즉시 비밀번호를 변경하고 고객센터로 문의해 주세요.`
+    });
+
+    return completeSocialLogin(res, updatedRows[0], {
+      linked: true,
+      message: `${config.label} 간편로그인이 기존 영테크 계정에 연결되었습니다.`
+    });
+  } catch (error) {
+    if (error.name === 'TokenExpiredError') {
+      return res.status(401).json({ message: '계정 연결 요청 시간이 만료되었습니다. 간편로그인을 다시 시도해 주세요.' });
+    }
+    console.error('Social Confirm Link Error:', error);
     return res.status(500).json({ message: '계정 연결 처리 중 오류가 발생했습니다.' });
   }
 });
@@ -994,7 +1066,12 @@ app.post('/api/auth/kakao', async (req, res) => {
         });
       }
 
-      return res.status(409).json({ message: '이미 다른 카카오 계정이 연결된 이메일입니다.' });
+      return sendSocialLinkRequired(res, {
+        provider: 'kakao',
+        providerUserId: kakaoUser.id,
+        user,
+        emailVerified: kakaoUser.emailVerified
+      });
     }
 
     const tempUserId = 'kakao_' + Date.now();
@@ -1166,7 +1243,12 @@ app.post('/api/auth/google', async (req, res) => {
         });
       }
 
-      return res.status(409).json({ message: '이미 다른 구글 계정이 연결된 이메일입니다.' });
+      return sendSocialLinkRequired(res, {
+        provider: 'google',
+        providerUserId: googleUser.id,
+        user,
+        emailVerified: googleUser.emailVerified
+      });
     }
 
     if (!allowSignup) {

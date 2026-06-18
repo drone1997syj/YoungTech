@@ -610,6 +610,25 @@ export const ShopProvider = ({ children }) => {
     }
   };
 
+  const confirmSocialAccountLink = async (linkToken) => {
+    try {
+      const data = await apiFetch('/auth/link-social-confirm', {
+        method: 'POST',
+        body: JSON.stringify({ linkToken })
+      });
+
+      localStorage.setItem('yt_token', data.token);
+      setUser(data.user);
+      return {
+        success: true,
+        linked: data.linked,
+        message: data.message
+      };
+    } catch (err) {
+      return { success: false, message: err.message };
+    }
+  };
+
   const updateSocialProfile = async (phone, address) => {
     try {
       const data = await apiFetch('/auth/profile-update', {
@@ -738,6 +757,7 @@ export const ShopProvider = ({ children }) => {
       loginWithGoogle,
       linkSocialAccount,
       linkSocialAccountByEmail,
+      confirmSocialAccountLink,
       updateSocialProfile,
       setUser,
       backendUrl: BACKEND_BASE_URL

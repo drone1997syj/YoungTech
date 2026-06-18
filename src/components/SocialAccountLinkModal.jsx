@@ -1,10 +1,16 @@
 import React, { useState } from 'react';
-import { KeyRound, LockKeyhole, Link2, X } from 'lucide-react';
+import { KeyRound, LockKeyhole, Link2, ShieldCheck, X } from 'lucide-react';
 import { useShop } from '../context/ShopContext';
 import '../pages/Auth.css';
 
 export default function SocialAccountLinkModal({ linkRequest, onClose, onLinked }) {
-  const { linkSocialAccount, linkSocialAccountByEmail, backendUrl } = useShop();
+  const {
+    linkSocialAccount,
+    linkSocialAccountByEmail,
+    confirmSocialAccountLink,
+    backendUrl
+  } = useShop();
+
   const [password, setPassword] = useState('');
   const [verificationCode, setVerificationCode] = useState('');
   const [error, setError] = useState('');
@@ -18,24 +24,31 @@ export default function SocialAccountLinkModal({ linkRequest, onClose, onLinked 
   if (!linkRequest) return null;
 
   const isEmailLink = linkRequest.linkMethod === 'email';
+  const isConfirmLink = linkRequest.linkMethod === 'confirm';
+  const providerLabel = linkRequest.providerLabel || '간편로그인';
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+
     if (isEmailLink && verificationCode.length !== 6) {
       setError('이메일로 받은 6자리 인증번호를 입력해 주세요.');
       return;
     }
 
-    if (!isEmailLink && !password.trim()) {
+    if (!isEmailLink && !isConfirmLink && !password.trim()) {
       setError('기존 영테크 비밀번호를 입력해 주세요.');
       return;
     }
 
     setSubmitting(true);
     setError('');
-    const res = isEmailLink
-      ? await linkSocialAccountByEmail(linkRequest.linkId, verificationCode)
-      : await linkSocialAccount(linkRequest.linkToken, password);
+
+    const res = isConfirmLink
+      ? await confirmSocialAccountLink(linkRequest.linkToken)
+      : isEmailLink
+        ? await linkSocialAccountByEmail(linkRequest.linkId, verificationCode)
+        : await linkSocialAccount(linkRequest.linkToken, password);
+
     setSubmitting(false);
 
     if (res.success) {
@@ -56,6 +69,7 @@ export default function SocialAccountLinkModal({ linkRequest, onClose, onLinked 
     setResetting(true);
     setResetError('');
     setResetResult('');
+
     try {
       const res = await fetch(`${backendUrl}/api/auth/reset-password`, {
         method: 'POST',
@@ -63,13 +77,14 @@ export default function SocialAccountLinkModal({ linkRequest, onClose, onLinked 
         body: JSON.stringify({ email: linkRequest.email, name: resetName })
       });
       const data = await res.json();
+
       if (!res.ok) {
         setResetError(data.message || '비밀번호 찾기에 실패했습니다.');
         return;
       }
 
       setResetResult(data.tempPassword
-        ? `임시 비밀번호가 발급되었습니다. 테스트용 임시 비밀번호: ${data.tempPassword}`
+        ? `테스트용 임시 비밀번호가 발급되었습니다: ${data.tempPassword}`
         : (data.message || '가입된 이메일로 임시 비밀번호 안내가 발송되었습니다.')
       );
       setPassword('');
@@ -79,6 +94,22 @@ export default function SocialAccountLinkModal({ linkRequest, onClose, onLinked 
     } finally {
       setResetting(false);
     }
+  };
+
+  const getBodyCopy = () => {
+    if (isConfirmLink) {
+      return `확인된 이메일이 기존 영테크 계정과 같습니다. 연결하면 앞으로 ${providerLabel}로도 로그인할 수 있습니다.`;
+    }
+    if (isEmailLink) {
+      return `이미 다른 ${providerLabel} 계정 연결 이력이 있어 계정 보호를 위해 이메일 인증이 필요합니다.`;
+    }
+    return `관리자 계정이거나 이메일 검증 상태를 확인할 수 없어 기존 영테크 비밀번호 확인이 필요합니다.`;
+  };
+
+  const getSubmitLabel = () => {
+    if (submitting) return '연결 중...';
+    if (isEmailLink) return '인증하고 로그인';
+    return '연결하고 로그인';
   };
 
   return (
@@ -93,14 +124,9 @@ export default function SocialAccountLinkModal({ linkRequest, onClose, onLinked 
         </div>
 
         <div className="social-link-copy">
-          <span className="social-link-kicker">{linkRequest.providerLabel} 계정 연결</span>
+          <span className="social-link-kicker">{providerLabel} 계정 연결</span>
           <h3>이미 영테크에 가입된 이메일입니다.</h3>
-          <p>
-            {isEmailLink
-              ? `가입된 이메일로 발송된 인증번호를 입력하면 앞으로 ${linkRequest.providerLabel}로도 로그인할 수 있습니다.`
-              : `기존 계정에 간편로그인을 연결하면 앞으로 ${linkRequest.providerLabel}로도 로그인할 수 있습니다. 계정 보호를 위해 기존 영테크 비밀번호를 한 번만 입력해 주세요.`
-            }
-          </p>
+          <p>{getBodyCopy()}</p>
         </div>
 
         <div className="social-link-email-card">
@@ -109,7 +135,14 @@ export default function SocialAccountLinkModal({ linkRequest, onClose, onLinked 
         </div>
 
         <form onSubmit={handleSubmit} className="social-link-form">
-          {isEmailLink ? (
+          {isConfirmLink && (
+            <div className="social-link-code-guide social-link-confirm-guide">
+              <ShieldCheck size={16} />
+              <span>이메일 전체 주소가 일치할 때만 같은 고객으로 판단합니다. 연결 완료 후 기존 이메일로 알림이 발송됩니다.</span>
+            </div>
+          )}
+
+          {isEmailLink && (
             <>
               <label>이메일 인증번호</label>
               <div className="social-link-password">
@@ -130,7 +163,9 @@ export default function SocialAccountLinkModal({ linkRequest, onClose, onLinked 
                 )}
               </div>
             </>
-          ) : (
+          )}
+
+          {!isEmailLink && !isConfirmLink && (
             <>
               <label>영테크 비밀번호</label>
               <div className="social-link-password">
@@ -149,21 +184,23 @@ export default function SocialAccountLinkModal({ linkRequest, onClose, onLinked 
           {error && (
             <div className="social-link-error">
               <span>{error}</span>
-              <button
-                type="button"
-                className="social-link-find-password"
-                onClick={() => {
-                  setShowPasswordReset(true);
-                  setResetError('');
-                  setResetResult('');
-                }}
-              >
-                비번 찾기
-              </button>
+              {!isEmailLink && !isConfirmLink && (
+                <button
+                  type="button"
+                  className="social-link-find-password"
+                  onClick={() => {
+                    setShowPasswordReset(true);
+                    setResetError('');
+                    setResetResult('');
+                  }}
+                >
+                  비번 찾기
+                </button>
+              )}
             </div>
           )}
 
-          {!isEmailLink && showPasswordReset && (
+          {!isEmailLink && !isConfirmLink && showPasswordReset && (
             <div className="social-link-reset-panel">
               <div className="social-link-reset-title">
                 <KeyRound size={15} />
@@ -191,7 +228,7 @@ export default function SocialAccountLinkModal({ linkRequest, onClose, onLinked 
               취소
             </button>
             <button type="submit" className="social-link-submit" disabled={submitting}>
-              {submitting ? '연결 중...' : isEmailLink ? '인증하고 로그인' : '연결하고 로그인'}
+              {getSubmitLabel()}
             </button>
           </div>
         </form>

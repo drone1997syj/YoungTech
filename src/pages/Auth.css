@@ -660,6 +660,21 @@
   font-size: 0.78rem;
 }
 
+.social-link-confirm-guide {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 0.5rem;
+  color: #166534;
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+}
+
+.social-link-confirm-guide svg {
+  flex-shrink: 0;
+  margin-top: 0.05rem;
+  color: #16a34a;
+}
+
 .social-link-error {
   display: flex;
   align-items: center;
