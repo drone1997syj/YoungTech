@@ -116,6 +116,18 @@ export default function Register() {
       return;
     }
 
+    if (
+      password.length < 8 ||
+      password.length > 64 ||
+      /\s/.test(password) ||
+      !/[A-Za-z]/.test(password) ||
+      !/\d/.test(password) ||
+      !/[!@#$%^&*()_\-+=[\]{};':"\\|,.<>/?`~]/.test(password)
+    ) {
+      setError('비밀번호는 8자 이상 64자 이하이며 영문, 숫자, 특수문자를 모두 포함해야 합니다.');
+      return;
+    }
+
     if (password !== confirmPassword) {
       setError('입력하신 비밀번호가 일치하지 않습니다. 다시 확인해 주세요.');
       return;
@@ -201,6 +213,7 @@ export default function Register() {
                 {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
               </button>
             </div>
+            <p className="form-help-text">8자 이상, 영문/숫자/특수문자를 모두 포함해 주세요.</p>
           </div>
 
           <div className="form-group">

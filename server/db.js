@@ -176,6 +176,8 @@ export async function initDb() {
         description TEXT,
         specs JSON,
         stock INT DEFAULT 50,
+        is_deleted BOOLEAN DEFAULT FALSE,
+        deleted_at TIMESTAMP NULL DEFAULT NULL,
         sort_order INT DEFAULT 0,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
@@ -185,6 +187,16 @@ export async function initDb() {
     try {
       await connection.query(`ALTER TABLE products ADD COLUMN sort_order INT DEFAULT 0`);
       console.log('Successfully checked/added sort_order column to products.');
+    } catch (err) {}
+
+    try {
+      await connection.query(`ALTER TABLE products ADD COLUMN is_deleted BOOLEAN DEFAULT FALSE AFTER stock`);
+      console.log('Successfully checked/added is_deleted column to products.');
+    } catch (err) {}
+
+    try {
+      await connection.query(`ALTER TABLE products ADD COLUMN deleted_at TIMESTAMP NULL DEFAULT NULL AFTER is_deleted`);
+      console.log('Successfully checked/added deleted_at column to products.');
     } catch (err) {}
 
     // 3. orders table
@@ -342,6 +354,25 @@ export async function initDb() {
       )
     `);
 
+    // 10. Customer address book
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS user_addresses (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id VARCHAR(255) NOT NULL,
+        label VARCHAR(100) DEFAULT '배송지',
+        recipient VARCHAR(100) NOT NULL,
+        phone VARCHAR(30) NOT NULL,
+        postcode VARCHAR(10),
+        base_address TEXT NOT NULL,
+        detail_address TEXT,
+        delivery_memo TEXT,
+        is_default BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_user_addresses_user_default (user_id, is_default)
+      )
+    `);
+
     // Read-heavy admin/mypage/security indexes.
     await ensureIndex(connection, 'users', 'idx_users_role', '`role`');
     await ensureIndex(connection, 'users', 'idx_users_locked_until', '`locked_until`');
@@ -351,6 +382,7 @@ export async function initDb() {
     await ensureIndex(connection, 'claims', 'idx_claims_user_created', '`user_id`, `created_at`');
     await ensureIndex(connection, 'claims', 'idx_claims_status_created', '`status`, `created_at`');
     await ensureIndex(connection, 'products', 'idx_products_category_sort', '`category`, `sort_order`');
+    await ensureIndex(connection, 'products', 'idx_products_deleted_category_sort', '`is_deleted`, `category`, `sort_order`');
     await ensureIndex(connection, 'reviews', 'idx_reviews_product_created', '`product_id`, `created_at`');
     await ensureIndex(connection, 'qna', 'idx_qna_product_created', '`product_id`, `created_at`');
     await ensureIndex(connection, 'social_link_verifications', 'idx_social_link_verify_user', '`user_id`, `provider`, `created_at`');

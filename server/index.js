@@ -7,6 +7,7 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
+import nodemailer from 'nodemailer';
 import { fileURLToPath } from 'url';
 import pool, { initDb } from './db.js';
 
@@ -74,6 +75,39 @@ const getPublicBaseUrl = (req) => {
   return 'http://localhost:5000';
 };
 
+const isMailConfigured = () => Boolean(
+  process.env.SMTP_HOST &&
+  process.env.SMTP_PORT &&
+  process.env.SMTP_USER &&
+  process.env.SMTP_PASS
+);
+
+const sendMail = async ({ to, subject, text }) => {
+  if (!isMailConfigured()) {
+    console.log(`[Mail:dev] ${subject} -> ${to}\n${text}`);
+    return { sent: false, devMode: true };
+  }
+
+  const transporter = nodemailer.createTransport({
+    host: process.env.SMTP_HOST,
+    port: Number(process.env.SMTP_PORT),
+    secure: String(process.env.SMTP_SECURE || '').toLowerCase() === 'true',
+    auth: {
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS
+    }
+  });
+
+  await transporter.sendMail({
+    from: process.env.SMTP_FROM || process.env.SMTP_USER,
+    to,
+    subject,
+    text
+  });
+
+  return { sent: true, devMode: false };
+};
+
 const getClientIp = (req) => (
   req.headers['x-forwarded-for']?.split(',')[0]?.trim()
   || req.socket?.remoteAddress
@@ -99,6 +133,29 @@ const createUnlockCode = () => String(Math.floor(100000 + Math.random() * 900000
 const buildLockMessage = (limit) => (
   `로그인 실패가 ${limit}회 이상 발생해 계정 보호를 위해 로그인이 제한되었습니다. 가입된 이메일 인증 후 다시 이용해 주세요.`
 );
+
+const validatePasswordPolicy = (password, context = {}) => {
+  const value = String(password || '');
+  if (value.length < 8 || value.length > 64) {
+    return '비밀번호는 8자 이상 64자 이하로 입력해 주세요.';
+  }
+  if (/\s/.test(value)) {
+    return '비밀번호에는 공백을 사용할 수 없습니다.';
+  }
+  if (!/[A-Za-z]/.test(value) || !/\d/.test(value) || !/[!@#$%^&*()_\-+=[\]{};':"\\|,.<>/?`~]/.test(value)) {
+    return '비밀번호는 영문, 숫자, 특수문자를 모두 포함해야 합니다.';
+  }
+  const lowered = value.toLowerCase();
+  const emailId = String(context.email || '').split('@')[0]?.toLowerCase();
+  const name = String(context.name || '').toLowerCase();
+  if (emailId && emailId.length >= 4 && lowered.includes(emailId)) {
+    return '비밀번호에 이메일 아이디와 같은 문자열을 포함할 수 없습니다.';
+  }
+  if (name && name.length >= 2 && lowered.includes(name)) {
+    return '비밀번호에 이름과 같은 문자열을 포함할 수 없습니다.';
+  }
+  return null;
+};
 
 const createLockUntilDate = () => new Date(Date.now() + LOGIN_LOCK_MINUTES * 60 * 1000);
 
@@ -167,6 +224,11 @@ app.post('/api/auth/register', async (req, res) => {
 
   if (!/^01\d{8,9}$/.test(normalizedPhone)) {
     return res.status(400).json({ message: '휴대폰 번호를 올바르게 입력해주세요.' });
+  }
+
+  const passwordError = validatePasswordPolicy(password, { email, name });
+  if (passwordError) {
+    return res.status(400).json({ message: passwordError });
   }
 
   try {
@@ -248,13 +310,19 @@ app.post('/api/auth/login', async (req, res) => {
           [failedCount, lockedUntilDate, unlockCodeHash, unlockExpiresAt, user.id]
         );
 
+        const mailResult = await sendMail({
+          to: user.email,
+          subject: '[YoungTech] 로그인 제한 해제 인증번호',
+          text: `YoungTech 로그인 제한 해제 인증번호는 ${unlockCode} 입니다.\n\n인증번호는 ${UNLOCK_CODE_MINUTES}분 동안만 사용할 수 있습니다.\n본인이 로그인한 것이 아니라면 비밀번호를 변경하고 고객센터로 문의해 주세요.`
+        });
+
         return res.status(423).json({
           message: buildLockMessage(limit),
           needsEmailUnlock: true,
           maskedEmail: maskEmailForRecovery(user.email),
           lockedUntil: lockedUntilDate.toISOString(),
           remainingMinutes: LOGIN_LOCK_MINUTES,
-          devUnlockCode: unlockCode
+          devUnlockCode: mailResult.devMode ? unlockCode : undefined
         });
       }
 
@@ -380,6 +448,11 @@ app.post('/api/auth/find-id', async (req, res) => {
 
     // 보안을 위해 이메일 마스킹 처리
     const maskedEmails = rows.map(row => maskEmailForRecovery(row.email));
+    await Promise.all(rows.map(row => sendMail({
+      to: row.email,
+      subject: '[YoungTech] 아이디 찾기 안내',
+      text: `YoungTech 아이디 찾기 요청이 접수되었습니다.\n\n확인된 가입 이메일: ${maskEmailForRecovery(row.email)}\n\n보안을 위해 전체 이메일 주소는 화면에 표시하지 않습니다. 본인이 요청하지 않았다면 이 메일을 무시해 주세요.`
+    })));
 
     res.json({
       success: true,
@@ -407,17 +480,22 @@ app.post('/api/auth/reset-password', async (req, res) => {
 
     const userId = rows[0].id;
     // 8자리 임시 비밀번호 난수 생성
-    const tempPassword = Math.random().toString(36).slice(-8);
+    const tempPassword = createTemporaryPassword();
     const hashedTempPassword = bcrypt.hashSync(tempPassword, 10);
 
     // 비밀번호 업데이트
     await pool.query('UPDATE users SET password = ? WHERE id = ?', [hashedTempPassword, userId]);
+    const mailResult = await sendMail({
+      to: email.trim(),
+      subject: '[YoungTech] 임시 비밀번호 안내',
+      text: `YoungTech 임시 비밀번호는 ${tempPassword} 입니다.\n\n로그인 후 반드시 마이페이지에서 새 비밀번호로 변경해 주세요.\n본인이 요청하지 않았다면 고객센터로 문의해 주세요.`
+    });
 
     // 모의 메일 전송 메시지 및 로컬 테스트용 복구값 제공
     res.json({ 
       success: true, 
       message: `${email} 주소로 임시 비밀번호가 발송되는 시뮬레이션이 활성화되었습니다.`, 
-      tempPassword 
+      tempPassword: mailResult.devMode ? tempPassword : undefined
     });
   } catch (error) {
     console.error('Reset Password Error:', error);
@@ -468,6 +546,11 @@ const createSocialLinkToken = ({ provider, providerUserId, email }) => jwt.sign(
 
 const createSocialLinkCode = () => String(Math.floor(100000 + Math.random() * 900000));
 
+const createTemporaryPassword = () => {
+  const base = crypto.randomBytes(6).toString('base64url').replace(/[^A-Za-z0-9]/g, '');
+  return `${base.slice(0, 10)}Aa!1`;
+};
+
 const createSocialLinkVerification = async ({ provider, providerUserId, user }) => {
   const code = createSocialLinkCode();
   const linkId = crypto.randomUUID();
@@ -477,7 +560,13 @@ const createSocialLinkVerification = async ({ provider, providerUserId, user }) 
      VALUES (?, ?, ?, ?, ?, ?, 0, DATE_ADD(NOW(), INTERVAL 10 MINUTE))`,
     [linkId, user.id, provider, providerUserId, user.email, bcrypt.hashSync(code, 10)]
   );
-  return { linkId, code };
+  const mailResult = await sendMail({
+    to: user.email,
+    subject: '[YoungTech] 간편로그인 연결 인증번호',
+    text: `YoungTech 간편로그인 연결 인증번호는 ${code} 입니다.\n\n인증번호는 10분 동안만 사용할 수 있으며, 5회 이상 틀리면 재발급이 필요합니다.\n본인이 요청하지 않았다면 이 메일을 무시하고 고객센터로 문의해 주세요.`
+  });
+
+  return { linkId, code, mailResult };
 };
 
 const sendSocialLinkRequired = async (res, { provider, providerUserId, user, emailVerified = false }) => {
@@ -500,7 +589,7 @@ const sendSocialLinkRequired = async (res, { provider, providerUserId, user, ema
     });
   }
 
-  const { linkId, code } = await createSocialLinkVerification({ provider, providerUserId, user });
+  const { linkId, code, mailResult } = await createSocialLinkVerification({ provider, providerUserId, user });
   return res.json({
     success: false,
     requiresAccountLink: true,
@@ -510,7 +599,7 @@ const sendSocialLinkRequired = async (res, { provider, providerUserId, user, ema
     email: user.email,
     maskedEmail: maskEmailForRecovery(user.email),
     linkId,
-    devVerificationCode: code,
+    devVerificationCode: mailResult?.devMode ? code : undefined,
     message: '이미 영테크에 가입된 이메일입니다. 가입된 이메일로 발송된 인증번호를 입력하면 간편로그인을 연결할 수 있습니다.'
   });
 };
@@ -564,6 +653,11 @@ app.post('/api/auth/link-social', async (req, res) => {
       [user.id, payload.provider, payload.providerUserId, 'password', 'linked']
     );
     const [updatedRows] = await pool.query('SELECT * FROM users WHERE id = ?', [user.id]);
+    await sendMail({
+      to: updatedRows[0].email,
+      subject: '[YoungTech] 간편로그인 연결 완료 안내',
+      text: `${config.label} 간편로그인이 YoungTech 계정에 연결되었습니다.\n\n본인이 연결한 것이 아니라면 즉시 비밀번호를 변경하고 고객센터로 문의해 주세요.`
+    });
 
     return completeSocialLogin(res, updatedRows[0], {
       linked: true,
@@ -644,6 +738,11 @@ app.post('/api/auth/link-social-email', async (req, res) => {
     );
 
     const [updatedRows] = await pool.query('SELECT * FROM users WHERE id = ?', [user.id]);
+    await sendMail({
+      to: updatedRows[0].email,
+      subject: '[YoungTech] 간편로그인 연결 완료 안내',
+      text: `${config.label} 간편로그인이 YoungTech 계정에 연결되었습니다.\n\n본인이 연결한 것이 아니라면 즉시 비밀번호를 변경하고 고객센터로 문의해 주세요.`
+    });
 
     return completeSocialLogin(res, updatedRows[0], {
       linked: true,
@@ -1112,6 +1211,145 @@ app.put('/api/auth/profile-update', authenticateToken, async (req, res) => {
   }
 });
 
+const normalizePhoneNumber = (phone) => String(phone || '').replace(/\D/g, '');
+
+app.get('/api/addresses', authenticateToken, async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      'SELECT * FROM user_addresses WHERE user_id = ? ORDER BY is_default DESC, updated_at DESC',
+      [req.user.id]
+    );
+    res.json(rows);
+  } catch (error) {
+    console.error('Address List Error:', error);
+    res.status(500).json({ message: '배송지 목록을 불러오는 중 오류가 발생했습니다.' });
+  }
+});
+
+app.post('/api/addresses', authenticateToken, async (req, res) => {
+  const {
+    label = '배송지',
+    recipient,
+    phone,
+    postcode = '',
+    base_address,
+    detail_address = '',
+    delivery_memo = '',
+    is_default = false
+  } = req.body;
+  const normalizedPhone = normalizePhoneNumber(phone);
+
+  if (!recipient || !normalizedPhone || !base_address) {
+    return res.status(400).json({ message: '수령인, 연락처, 기본 주소를 입력해 주세요.' });
+  }
+  if (!/^01\d{8,9}$/.test(normalizedPhone)) {
+    return res.status(400).json({ message: '휴대폰 번호를 올바르게 입력해 주세요. 예: 010-1234-5678' });
+  }
+
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    if (is_default) {
+      await connection.query('UPDATE user_addresses SET is_default = FALSE WHERE user_id = ?', [req.user.id]);
+      await connection.query('UPDATE users SET phone = ?, address = ? WHERE id = ?', [normalizedPhone, base_address, req.user.id]);
+    }
+    const [result] = await connection.query(
+      `INSERT INTO user_addresses
+       (user_id, label, recipient, phone, postcode, base_address, detail_address, delivery_memo, is_default)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        req.user.id,
+        String(label || '배송지').slice(0, 100),
+        recipient.trim(),
+        normalizedPhone,
+        String(postcode || '').slice(0, 10),
+        base_address.trim(),
+        detail_address.trim(),
+        delivery_memo,
+        Boolean(is_default)
+      ]
+    );
+    await connection.commit();
+    res.status(201).json({ success: true, id: result.insertId, message: '배송지가 저장되었습니다.' });
+  } catch (error) {
+    await connection.rollback();
+    console.error('Address Create Error:', error);
+    res.status(500).json({ message: '배송지 저장 중 오류가 발생했습니다.' });
+  } finally {
+    connection.release();
+  }
+});
+
+app.put('/api/addresses/:id', authenticateToken, async (req, res) => {
+  const {
+    label = '배송지',
+    recipient,
+    phone,
+    postcode = '',
+    base_address,
+    detail_address = '',
+    delivery_memo = '',
+    is_default = false
+  } = req.body;
+  const normalizedPhone = normalizePhoneNumber(phone);
+
+  if (!recipient || !normalizedPhone || !base_address) {
+    return res.status(400).json({ message: '수령인, 연락처, 기본 주소를 입력해 주세요.' });
+  }
+  if (!/^01\d{8,9}$/.test(normalizedPhone)) {
+    return res.status(400).json({ message: '휴대폰 번호를 올바르게 입력해 주세요. 예: 010-1234-5678' });
+  }
+
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    if (is_default) {
+      await connection.query('UPDATE user_addresses SET is_default = FALSE WHERE user_id = ?', [req.user.id]);
+      await connection.query('UPDATE users SET phone = ?, address = ? WHERE id = ?', [normalizedPhone, base_address, req.user.id]);
+    }
+    const [result] = await connection.query(
+      `UPDATE user_addresses
+       SET label = ?, recipient = ?, phone = ?, postcode = ?, base_address = ?, detail_address = ?, delivery_memo = ?, is_default = ?
+       WHERE id = ? AND user_id = ?`,
+      [
+        String(label || '배송지').slice(0, 100),
+        recipient.trim(),
+        normalizedPhone,
+        String(postcode || '').slice(0, 10),
+        base_address.trim(),
+        detail_address.trim(),
+        delivery_memo,
+        Boolean(is_default),
+        req.params.id,
+        req.user.id
+      ]
+    );
+    await connection.commit();
+    if (result.affectedRows === 0) return res.status(404).json({ message: '배송지를 찾을 수 없습니다.' });
+    res.json({ success: true, message: '배송지가 수정되었습니다.' });
+  } catch (error) {
+    await connection.rollback();
+    console.error('Address Update Error:', error);
+    res.status(500).json({ message: '배송지 수정 중 오류가 발생했습니다.' });
+  } finally {
+    connection.release();
+  }
+});
+
+app.delete('/api/addresses/:id', authenticateToken, async (req, res) => {
+  try {
+    const [result] = await pool.query(
+      'DELETE FROM user_addresses WHERE id = ? AND user_id = ?',
+      [req.params.id, req.user.id]
+    );
+    if (result.affectedRows === 0) return res.status(404).json({ message: '배송지를 찾을 수 없습니다.' });
+    res.json({ success: true, message: '배송지가 삭제되었습니다.' });
+  } catch (error) {
+    console.error('Address Delete Error:', error);
+    res.status(500).json({ message: '배송지 삭제 중 오류가 발생했습니다.' });
+  }
+});
+
 // ==========================================
 // File Upload API
 // ==========================================
@@ -1189,7 +1427,7 @@ app.post('/api/categories', requireAdmin, async (req, res) => {
 
 app.delete('/api/categories/:id', requireAdmin, async (req, res) => {
   try {
-    const [prods] = await pool.query('SELECT COUNT(*) as count FROM products WHERE category = ?', [req.params.id]);
+    const [prods] = await pool.query('SELECT COUNT(*) as count FROM products WHERE category = ? AND is_deleted = FALSE', [req.params.id]);
     if (prods[0].count > 0) {
       return res.status(400).json({ 
         message: '해당 품목군에 등록된 상품이 존재하여 삭제할 수 없습니다. 상품들의 카테고리를 먼저 변경하거나 삭제해주세요.' 
@@ -1222,7 +1460,7 @@ app.put('/api/categories/:id', requireAdmin, async (req, res) => {
 // ==========================================
 app.get('/api/products', async (req, res) => {
   try {
-    const [rows] = await pool.query('SELECT * FROM products ORDER BY sort_order ASC, created_at DESC');
+    const [rows] = await pool.query('SELECT * FROM products WHERE is_deleted = FALSE ORDER BY sort_order ASC, created_at DESC');
     // Ensure specs parsing
     const parsedRows = rows.map(r => ({
       ...r,
@@ -1246,7 +1484,7 @@ app.put('/api/products/reorder', requireAdmin, async (req, res) => {
   try {
     await connection.beginTransaction();
     for (const item of orders) {
-      await connection.query('UPDATE products SET sort_order = ? WHERE id = ?', [item.sort_order, item.id]);
+      await connection.query('UPDATE products SET sort_order = ? WHERE id = ? AND is_deleted = FALSE', [item.sort_order, item.id]);
     }
     await connection.commit();
     res.json({ success: true, message: '상품 순서가 정상적으로 업데이트되었습니다.' });
@@ -1261,7 +1499,7 @@ app.put('/api/products/reorder', requireAdmin, async (req, res) => {
 
 app.get('/api/products/:id', async (req, res) => {
   try {
-    const [rows] = await pool.query('SELECT * FROM products WHERE id = ?', [req.params.id]);
+    const [rows] = await pool.query('SELECT * FROM products WHERE id = ? AND is_deleted = FALSE', [req.params.id]);
     if (rows.length === 0) return res.status(404).json({ message: '상품을 찾을 수 없습니다.' });
     const product = rows[0];
     product.specs = typeof product.specs === 'string' ? JSON.parse(product.specs) : product.specs;
@@ -1280,7 +1518,7 @@ async function validateProductPrice(price, category, id = null) {
   }
 
   // 2. Average price deviation check (10x higher or 10x lower than category average)
-  let query = 'SELECT AVG(price) as avg_price FROM products WHERE category = ?';
+  let query = 'SELECT AVG(price) as avg_price FROM products WHERE category = ? AND is_deleted = FALSE';
   let params = [category];
   if (id) {
     query += ' AND id != ?';
@@ -1313,8 +1551,13 @@ app.post('/api/products', requireAdmin, async (req, res) => {
   }
 
   try {
-    const [existing] = await pool.query('SELECT * FROM products WHERE id = ?', [id]);
+    const [existing] = await pool.query('SELECT id, is_deleted FROM products WHERE id = ?', [id]);
     if (existing.length > 0) {
+      if (existing[0].is_deleted) {
+        return res.status(409).json({
+          message: '삭제 처리된 상품 ID입니다. 주문 이력 보호를 위해 같은 ID는 재사용할 수 없습니다. 새 상품 ID를 사용해 주세요.'
+        });
+      }
       return res.status(400).json({ message: '이미 존재하는 상품 ID입니다.' });
     }
 
@@ -1340,7 +1583,7 @@ app.put('/api/products/:id', requireAdmin, async (req, res) => {
   }
 
   try {
-    const [existing] = await pool.query('SELECT * FROM products WHERE id = ?', [productId]);
+    const [existing] = await pool.query('SELECT * FROM products WHERE id = ? AND is_deleted = FALSE', [productId]);
     if (existing.length === 0) {
       return res.status(404).json({ message: '상품을 찾을 수 없습니다.' });
     }
@@ -1359,13 +1602,13 @@ app.put('/api/products/:id', requireAdmin, async (req, res) => {
 
 app.delete('/api/products/:id', requireAdmin, async (req, res) => {
   try {
-    const [existing] = await pool.query('SELECT * FROM products WHERE id = ?', [req.params.id]);
+    const [existing] = await pool.query('SELECT * FROM products WHERE id = ? AND is_deleted = FALSE', [req.params.id]);
     if (existing.length === 0) {
       return res.status(404).json({ message: '상품을 찾을 수 없습니다.' });
     }
 
-    await pool.query('DELETE FROM products WHERE id = ?', [req.params.id]);
-    res.json({ message: '상품이 삭제되었습니다.' });
+    await pool.query('UPDATE products SET is_deleted = TRUE, deleted_at = NOW(), stock = 0 WHERE id = ?', [req.params.id]);
+    res.json({ message: '상품이 삭제 처리되었습니다. 주문 이력 보호를 위해 실제 데이터는 보존됩니다.' });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: '서버 내부 오류' });
@@ -1379,8 +1622,8 @@ app.post('/api/products/batch-delete', requireAdmin, async (req, res) => {
     return res.status(400).json({ message: '삭제할 상품 ID 리스트가 필요합니다.' });
   }
   try {
-    await pool.query('DELETE FROM products WHERE id IN (?)', [ids]);
-    res.json({ success: true, message: `${ids.length}개의 상품이 성공적으로 삭제되었습니다.` });
+    await pool.query('UPDATE products SET is_deleted = TRUE, deleted_at = NOW(), stock = 0 WHERE id IN (?) AND is_deleted = FALSE', [ids]);
+    res.json({ success: true, message: `${ids.length}개의 상품이 삭제 처리되었습니다. 주문 이력 보호를 위해 실제 데이터는 보존됩니다.` });
   } catch (error) {
     console.error('Batch Delete Error:', error);
     res.status(500).json({ message: '상품 일괄 삭제 중 서버 내부 오류가 발생했습니다.' });
@@ -1394,7 +1637,7 @@ app.post('/api/products/batch-out-of-stock', requireAdmin, async (req, res) => {
     return res.status(400).json({ message: '품절 처리할 상품 ID 리스트가 필요합니다.' });
   }
   try {
-    await pool.query('UPDATE products SET stock = 0 WHERE id IN (?)', [ids]);
+    await pool.query('UPDATE products SET stock = 0 WHERE id IN (?) AND is_deleted = FALSE', [ids]);
     res.json({ success: true, message: `${ids.length}개의 상품이 품절 처리되었습니다.` });
   } catch (error) {
     console.error('Batch Out-Of-Stock Error:', error);
@@ -2498,7 +2741,7 @@ initDb().then(() => {
 
     // 6. 사용자 프로필 수정 API
     app.put('/api/users/profile', authenticateToken, async (req, res) => {
-      const { name, password, address } = req.body;
+      const { name, password, phone, address } = req.body;
       const userId = req.user.id;
 
       try {
@@ -2517,7 +2760,25 @@ initDb().then(() => {
           let updateQuery = 'UPDATE users SET name = ?';
           let updateParams = [name || userRows[0].name];
 
+          if (phone !== undefined) {
+            const normalizedPhone = String(phone || '').replace(/\D/g, '');
+            if (!/^01\d{8,9}$/.test(normalizedPhone)) {
+              await connection.rollback();
+              return res.status(400).json({ message: '휴대폰 번호를 올바르게 입력해 주세요. 예: 010-1234-5678' });
+            }
+            updateQuery += ', phone = ?';
+            updateParams.push(normalizedPhone);
+          }
+
           if (password && password.trim() !== '') {
+            const passwordError = validatePasswordPolicy(password, {
+              email: userRows[0].email,
+              name: name || userRows[0].name
+            });
+            if (passwordError) {
+              await connection.rollback();
+              return res.status(400).json({ message: passwordError });
+            }
             const hashedPassword = await bcrypt.hash(password, 10);
             updateQuery += ', password = ?';
             updateParams.push(hashedPassword);
@@ -2535,7 +2796,7 @@ initDb().then(() => {
           await connection.commit();
 
           // 3. 갱신된 회원 정보 반환
-          const [updatedUser] = await pool.query('SELECT id, email, name, role, address, created_at FROM users WHERE id = ?', [userId]);
+          const [updatedUser] = await pool.query('SELECT id, email, name, phone, role, address, created_at FROM users WHERE id = ?', [userId]);
           res.json({ success: true, message: '회원 정보가 수정되었습니다.', user: updatedUser[0] });
         } catch (err) {
           await connection.rollback();

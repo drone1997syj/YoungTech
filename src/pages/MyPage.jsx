@@ -20,6 +20,7 @@ export default function MyPage() {
   const [editName, setEditName] = useState('');
   const [editPassword, setEditPassword] = useState('');
   const [editConfirmPassword, setEditConfirmPassword] = useState('');
+  const [editPhone, setEditPhone] = useState('');
   const [editAddress, setEditAddress] = useState('');
 
   const loadUserOrders = async () => {
@@ -54,6 +55,7 @@ export default function MyPage() {
     setEditName(user.name || '');
     setEditPassword('');
     setEditConfirmPassword('');
+    setEditPhone(user.phone || '');
     setEditAddress(user.address || '');
     setShowEditProfileModal(true);
   };
@@ -78,6 +80,7 @@ export default function MyPage() {
         setEditName(user.name || '');
         setEditPassword('');
         setEditConfirmPassword('');
+        setEditPhone(user.phone || '');
         setEditAddress(user.address || '');
         setShowEditProfileModal(true);
       } else {
@@ -134,13 +137,25 @@ export default function MyPage() {
       alert('이름을 입력해 주세요.');
       return;
     }
+    const normalizedEditPhone = editPhone.replace(/\D/g, '');
+    if (!/^01\d{8,9}$/.test(normalizedEditPhone)) {
+      alert('휴대폰 번호를 올바르게 입력해 주세요. 예: 010-1234-5678');
+      return;
+    }
+
     if (editPassword) {
       if (editPassword !== editConfirmPassword) {
         alert('비밀번호와 비밀번호 확인이 일치하지 않습니다.');
         return;
       }
-      if (editPassword.length < 4) {
-        alert('비밀번호는 최소 4자 이상이어야 합니다.');
+      if (
+        editPassword.length < 8 ||
+        /\s/.test(editPassword) ||
+        !/[A-Za-z]/.test(editPassword) ||
+        !/\d/.test(editPassword) ||
+        !/[!@#$%^&*()_\-+=[\]{};':"\\|,.<>/?`~]/.test(editPassword)
+      ) {
+        alert('비밀번호는 8자 이상이며 영문, 숫자, 특수문자를 모두 포함해야 합니다.');
         return;
       }
     }
@@ -156,6 +171,7 @@ export default function MyPage() {
         body: JSON.stringify({
           name: editName,
           password: editPassword || undefined,
+          phone: normalizedEditPhone,
           address: editAddress
         })
       });
@@ -833,7 +849,7 @@ export default function MyPage() {
                   value={editPassword} 
                   onChange={(e) => setEditPassword(e.target.value)} 
                   className="naver-input" 
-                  placeholder="변경할 때만 입력하세요 (최소 4자)"
+                  placeholder="변경할 때만 입력하세요 (영문+숫자+특수문자, 8자 이상)"
                 />
               </div>
 
@@ -845,6 +861,27 @@ export default function MyPage() {
                   onChange={(e) => setEditConfirmPassword(e.target.value)} 
                   className="naver-input" 
                   placeholder="새 비밀번호를 한번 더 입력해 주세요"
+                />
+              </div>
+
+              <div className="naver-input-group">
+                <label className="naver-label">휴대폰 번호</label>
+                <input
+                  type="tel"
+                  value={editPhone}
+                  onChange={(e) => {
+                    const digits = e.target.value.replace(/\D/g, '').slice(0, 11);
+                    const formatted = digits.length <= 3
+                      ? digits
+                      : digits.length <= 7
+                        ? `${digits.slice(0, 3)}-${digits.slice(3)}`
+                        : `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7)}`;
+                    setEditPhone(formatted);
+                  }}
+                  className="naver-input"
+                  placeholder="010-1234-5678"
+                  inputMode="numeric"
+                  required
                 />
               </div>
 
