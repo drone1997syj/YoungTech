@@ -88,60 +88,40 @@ export default function ProductList() {
             className={`category-pill ${activeCategory === 'all' ? 'active' : ''}`}
             onClick={() => handleCategoryClick('all')}
           >
-            전체 상품 <span>{visibleProducts.length}</span>
+            전체 상품
           </button>
+
           {(categories || []).map(category => (
-            <button
-              key={category.id}
-              className={`category-pill ${activeCategory === category.id ? 'active' : ''}`}
-              onClick={() => handleCategoryClick(category.id)}
-            >
-              {category.name} <span>{visibleProducts.filter(product => product.category === category.id).length}</span>
-            </button>
+            <div key={category.id} className="category-group">
+              <button
+                className={`category-pill ${activeCategory === category.id && selectedBrand === 'all' ? 'active' : ''}`}
+                onClick={() => handleCategoryClick(category.id)}
+              >
+                {category.name}
+              </button>
+
+              {category.id === 'motor' && activeCategory === 'motor' && motorBrands.length > 0 && (
+                <div className="brand-list">
+                  {motorBrands.map(brand => (
+                    <button
+                      key={brand}
+                      type="button"
+                      className={`brand-list-item ${selectedBrand === brand ? 'active' : ''}`}
+                      onClick={() => setSelectedBrand(brand)}
+                    >
+                      {brand}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           ))}
         </aside>
 
         <main className="product-list-main">
           <section className="list-hero-card">
-            <div>
-              <p className="eyebrow">B2B FA Parts</p>
-              <h2>{activeCategory === 'all' ? '전체 상품' : getCategoryName(activeCategory)}</h2>
-              <p>
-                {activeCategory === 'motor'
-                  ? '브랜드를 선택하면 모터 제품만 빠르게 정리해서 볼 수 있습니다.'
-                  : '필요한 자동화 부품을 카테고리와 검색어로 간단하게 찾아보세요.'}
-              </p>
-            </div>
-            <strong>{filteredProducts.length}개</strong>
+            <h2>{activeCategory === 'all' ? '전체 상품' : getCategoryName(activeCategory)}</h2>
           </section>
-
-          {activeCategory === 'motor' && motorBrands.length > 0 && (
-            <section className="brand-filter-card">
-              <div className="brand-filter-title">
-                <span>브랜드 퀵 필터</span>
-                <small>관리자 상품 브랜드 값 기준 자동 생성</small>
-              </div>
-              <div className="brand-chip-row">
-                <button
-                  type="button"
-                  className={`brand-chip ${selectedBrand === 'all' ? 'active' : ''}`}
-                  onClick={() => setSelectedBrand('all')}
-                >
-                  전체
-                </button>
-                {motorBrands.map(brand => (
-                  <button
-                    key={brand}
-                    type="button"
-                    className={`brand-chip ${selectedBrand === brand ? 'active' : ''}`}
-                    onClick={() => setSelectedBrand(brand)}
-                  >
-                    {brand}
-                  </button>
-                ))}
-              </div>
-            </section>
-          )}
 
           {filteredProducts.length > 0 ? (
             <div className="product-card-grid">
@@ -187,8 +167,7 @@ export default function ProductList() {
           ) : (
             <div className="empty-product-card">
               <Search size={42} />
-              <h4>조건에 맞는 상품이 없습니다.</h4>
-              <p>브랜드 필터나 검색어를 바꿔 다시 확인해 주세요.</p>
+              <h4>상품이 없습니다.</h4>
               <button onClick={() => { setSearchQuery(''); setSelectedBrand('all'); setActiveCategory('all'); }}>
                 전체 상품 보기
               </button>
