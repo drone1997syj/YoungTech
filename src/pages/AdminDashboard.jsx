@@ -41,8 +41,8 @@ export default function AdminDashboard() {
   // Pagination State for Products List
   const [prodPage, setProdPage] = useState(1);
   const [prodFilter, setProdFilter] = useState('all');
-  const [prodSortField, setProdSortField] = useState('category');
-  const [prodSortDirection, setProdSortDirection] = useState('asc');
+  const [prodSortField, setProdSortField] = useState('created_at');
+  const [prodSortDirection, setProdSortDirection] = useState('desc');
   const ITEMS_PER_PAGE = 20;
 
   useEffect(() => {
@@ -936,9 +936,8 @@ export default function AdminDashboard() {
                       return Number(product.stock || 0);
                     case 'created_at':
                       return new Date(product.created_at || 0).getTime();
-                    case 'sort_order':
                     default:
-                      return Number(product.sort_order || 0);
+                      return new Date(product.created_at || 0).getTime();
                   }
                 };
                 const sortedProducts = [...filteredProducts].sort((a, b) => {
@@ -1052,7 +1051,6 @@ export default function AdminDashboard() {
                             <option value="name">이름별</option>
                             <option value="stock">재고수량별</option>
                             <option value="price">가격별</option>
-                            <option value="sort_order">수동 순서별</option>
                           </select>
                           <button
                             type="button"
@@ -1118,8 +1116,6 @@ export default function AdminDashboard() {
                             <th className="py-3 px-2">가격</th>
                             <th className="py-3 px-2">재고수량</th>
                             <th className="py-3 px-2">등록일시</th>
-                            <th className="py-3 px-2">ID</th>
-                            <th className="py-3 px-2" style={{ width: '120px' }}>순서 정렬</th>
                             <th className="py-3 px-2 text-center">관리</th>
                           </tr>
                         </thead>
@@ -1128,10 +1124,6 @@ export default function AdminDashboard() {
                             paginatedProducts.map(p => {
                               const catObj = categories.find(c => c.id === p.category);
                               const categoryName = catObj ? catObj.name : p.category;
-                              
-                              // Find index in current filtered product list for up/down swapping
-                              const globalIndex = sortedProducts.findIndex(item => item.id === p.id);
-
                               return (
                                 <tr key={p.id} className="border-b text-sm text-dark hover:bg-slate-50">
                                   <td className="py-3 px-2">
@@ -1153,38 +1145,6 @@ export default function AdminDashboard() {
                                     )}
                                   </td>
                                   <td className="py-3 px-2 text-xs text-light">{p.created_at ? formatOrderDateTime(p.created_at) : '-'}</td>
-                                  <td className="py-3 px-2 font-mono font-bold text-light text-xs">{p.id}</td>
-                                  <td className="py-3 px-2">
-                                    <div className="flex items-center gap-1.5">
-                                      <input
-                                        type="number"
-                                        className="order-input"
-                                        value={p.sort_order || 0}
-                                        onChange={(e) => handleProductOrderChange(p.id, e.target.value)}
-                                        title="가중치가 작을수록 우선 노출됩니다."
-                                      />
-                                      <div className="order-btn-group">
-                                        <button 
-                                          onClick={() => handleProductMoveUp(p, globalIndex, sortedProducts)}
-                                          disabled={globalIndex === 0}
-                                          className="order-btn"
-                                          title="위로 이동"
-                                          style={{ opacity: globalIndex === 0 ? 0.3 : 1 }}
-                                        >
-                                          ▲
-                                        </button>
-                                        <button 
-                                          onClick={() => handleProductMoveDown(p, globalIndex, sortedProducts)}
-                                          disabled={globalIndex === sortedProducts.length - 1}
-                                          className="order-btn"
-                                          title="아래로 이동"
-                                          style={{ opacity: globalIndex === sortedProducts.length - 1 ? 0.3 : 1 }}
-                                        >
-                                          ▼
-                                        </button>
-                                      </div>
-                                    </div>
-                                  </td>
                                   <td className="py-3 px-2 text-center flex justify-center items-center gap-2">
                                     <button 
                                       onClick={() => handleCopyProduct(p)} 
@@ -1205,7 +1165,7 @@ export default function AdminDashboard() {
                             })
                           ) : (
                             <tr>
-                              <td colSpan="9" className="text-center py-6 text-sm text-light">해당 분류의 등록된 상품이 없습니다.</td>
+                              <td colSpan="7" className="text-center py-6 text-sm text-light">해당 분류의 등록된 상품이 없습니다.</td>
                             </tr>
                           )}
                         </tbody>
