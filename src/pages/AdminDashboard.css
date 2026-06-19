@@ -136,6 +136,7 @@
   border-radius: 20px;
   box-shadow: 0 16px 30px rgba(15, 23, 42, 0.04);
   overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
 .product-table-headbar {
@@ -157,7 +158,7 @@
 .product-table-headline strong {
   color: #111827;
   font-size: 0.98rem;
-  font-weight: 900;
+  font-weight: 700;
   letter-spacing: -0.02em;
 }
 
@@ -182,7 +183,7 @@
   border: 1px solid #e2e8f0;
   color: #475569;
   font-size: 0.72rem;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .product-table-wrap {
@@ -193,7 +194,7 @@
   background: #f9fafb;
   color: #334155;
   font-size: 0.78rem;
-  font-weight: 900;
+  font-weight: 700;
   letter-spacing: -0.02em;
   border-bottom: 1px solid #e5e7eb;
 }
@@ -226,7 +227,7 @@
   background: #ffffff;
   color: #334155;
   font-size: 0.72rem;
-  font-weight: 800;
+  font-weight: 600;
   cursor: pointer;
   transition: all 0.18s ease;
 }
@@ -259,7 +260,7 @@
 .product-name {
   color: #111827;
   font-size: 0.92rem;
-  font-weight: 900;
+  font-weight: 600;
   line-height: 1.35;
   letter-spacing: -0.02em;
   word-break: keep-all;
@@ -280,7 +281,7 @@
   background: #f8fafc;
   color: #64748b;
   font-size: 0.68rem;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .product-meta-pill.brand {
@@ -293,7 +294,7 @@
 .product-stock-value {
   color: #111827;
   font-size: 0.95rem;
-  font-weight: 900;
+  font-weight: 700;
   letter-spacing: -0.02em;
 }
 
@@ -303,7 +304,7 @@
   gap: 0.15rem;
   color: #64748b;
   font-size: 0.76rem;
-  font-weight: 700;
+  font-weight: 500;
 }
 
 .product-status-chip {
@@ -314,7 +315,7 @@
   padding: 0.38rem 0.65rem;
   border-radius: 999px;
   font-size: 0.72rem;
-  font-weight: 900;
+  font-weight: 600;
   border: 1px solid transparent;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55);
 }
@@ -338,7 +339,62 @@
 }
 
 .product-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 1rem 1.25rem 0.5rem;
+  margin-top: 1rem;
+  border-top: 1px solid #eef2f7;
   background: #ffffff;
+}
+
+.product-pagination-info {
+  color: #64748b;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.product-pagination-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.product-pagination-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.2rem;
+  height: 2rem;
+  padding: 0 0.65rem;
+  border-radius: 999px;
+  border: 1px solid #dbe3ef;
+  background: #ffffff;
+  color: #334155;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.product-pagination-btn:hover:not(:disabled) {
+  border-color: #c7d2fe;
+  background: #f8fafc;
+  color: #4f46e5;
+}
+
+.product-pagination-btn:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+.product-pagination-btn.page.active {
+  border-color: #8b5cf6;
+  background: #8b5cf6;
+  color: #ffffff;
 }
 
 .admin-category-tree {

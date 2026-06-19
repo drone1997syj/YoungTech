@@ -1365,7 +1365,7 @@ export default function AdminDashboard() {
                   return prodSortDirection === 'desc' ? -result : result;
                 });
 
-                const totalPages = Math.ceil(sortedProducts.length / itemsPerPage);
+                const totalPages = Math.max(1, Math.ceil(sortedProducts.length / itemsPerPage));
                 const startIndex = (prodPage - 1) * itemsPerPage;
                 const paginatedProducts = sortedProducts.slice(startIndex, startIndex + itemsPerPage);
 
@@ -1388,22 +1388,18 @@ export default function AdminDashboard() {
                 return (
                   <div className="tab-products flex flex-col gap-6">
                     {/* 스마트스토어 스타일 상품 현황 대시보드 */}
-                    <div className="grid grid-cols-4 gap-4">
+                    <div className="grid grid-cols-3 gap-4">
                       <div className="card p-4 flex flex-col justify-between" style={{ backgroundColor: '#f8fafc', borderLeft: '4px solid #8b5cf6' }}>
-                        <span className="text-2xs text-light font-bold">전체 상품</span>
-                        <span className="text-lg font-black text-dark mt-1">{products.length} <span className="text-xs font-normal text-light">건</span></span>
+                        <span className="text-2xs text-light font-bold">?? ??</span>
+                        <span className="text-lg font-black text-dark mt-1">{products.length} <span className="text-xs font-normal text-light">?</span></span>
                       </div>
                       <div className="card p-4 flex flex-col justify-between" style={{ backgroundColor: '#f8fafc', borderLeft: '4px solid #10b981' }}>
-                        <span className="text-2xs text-light font-bold">판매 중</span>
-                        <span className="text-lg font-black text-green-600 mt-1">{products.filter(p => p.stock > 0).length} <span className="text-xs font-normal text-light">건</span></span>
+                        <span className="text-2xs text-light font-bold">?? ?</span>
+                        <span className="text-lg font-black text-green-600 mt-1">{products.filter(p => p.stock > 0).length} <span className="text-xs font-normal text-light">?</span></span>
                       </div>
                       <div className="card p-4 flex flex-col justify-between" style={{ backgroundColor: '#f8fafc', borderLeft: '4px solid #f59e0b' }}>
-                        <span className="text-2xs text-light font-bold">품절 임박/품절</span>
-                        <span className="text-lg font-black text-amber-600 mt-1">{products.filter(p => p.stock === 0).length} <span className="text-xs font-normal text-light">건</span></span>
-                      </div>
-                      <div className="card p-4 flex flex-col justify-between" style={{ backgroundColor: '#f8fafc', borderLeft: '4px solid #3b82f6' }}>
-                        <span className="text-2xs text-light font-bold">카테고리 수</span>
-                        <span className="text-lg font-black text-blue-600 mt-1">{categories.length} <span className="text-xs font-normal text-light">개</span></span>
+                        <span className="text-2xs text-light font-bold">?? ??/??</span>
+                        <span className="text-lg font-black text-amber-600 mt-1">{products.filter(p => p.stock === 0).length} <span className="text-xs font-normal text-light">?</span></span>
                       </div>
                     </div>
 
@@ -1567,7 +1563,6 @@ export default function AdminDashboard() {
                               paginatedProducts.map((p) => {
                                 const statusMeta = getProductStatusMeta(p);
                                 const productCategoryName = getProductCategoryName(p);
-                                const productBrandName = String(p.brand || '').trim();
                                 return (
                                   <tr key={p.id} className="border-b text-sm text-dark hover:bg-slate-50 product-row">
                                     <td className="py-3 px-2 text-center">
@@ -1602,9 +1597,6 @@ export default function AdminDashboard() {
                                         <div className="product-meta-line">
                                           {productCategoryName && (
                                             <span className="product-meta-pill">{productCategoryName}</span>
-                                          )}
-                                          {productBrandName && (
-                                            <span className="product-meta-pill brand">{productBrandName}</span>
                                           )}
                                         </div>
                                       </div>
@@ -1642,35 +1634,36 @@ export default function AdminDashboard() {
                         </table>
                       </div>
 
-                      {totalPages > 1 && (
-                        <div className="flex justify-center items-center gap-2 mt-6 pt-4 border-t flex-wrap">
-                          <button 
-                            disabled={prodPage === 1}
-                            onClick={() => setProdPage(prev => Math.max(1, prev - 1))}
-                            className="btn btn-secondary py-1 px-2 text-2xs"
-                          >
-                            이전
-                          </button>
-                          {pageNumbers.map(num => (
-                            <button
-                               key={num}
-                               onClick={() => setProdPage(num)}
-                               className={`py-1 px-2.5 text-2xs rounded border transition-all ${
-                                 prodPage === num 
-                                   ? 'bg-primary text-white border-primary font-bold' 
-                                   : 'bg-white text-dark border-slate-200 hover:bg-slate-50'
-                               }`}
+                      {(
+                        <div className="product-pagination">
+                          <div className="product-pagination-info">
+                            ??? {prodPage} / {totalPages}
+                          </div>
+                          <div className="product-pagination-controls">
+                            <button 
+                              disabled={prodPage === 1}
+                              onClick={() => setProdPage(prev => Math.max(1, prev - 1))}
+                              className="product-pagination-btn"
                             >
-                              {num}
+                              ??
                             </button>
-                          ))}
-                          <button 
-                            disabled={prodPage === totalPages}
-                            onClick={() => setProdPage(prev => Math.min(totalPages, prev + 1))}
-                            className="btn btn-secondary py-1 px-2 text-2xs"
-                          >
-                            다음
-                          </button>
+                            {pageNumbers.map(num => (
+                              <button
+                                 key={num}
+                                 onClick={() => setProdPage(num)}
+                                 className={`product-pagination-btn page ${prodPage === num ? 'active' : ''}`}
+                              >
+                                {num}
+                              </button>
+                            ))}
+                            <button 
+                              disabled={prodPage === totalPages}
+                              onClick={() => setProdPage(prev => Math.min(totalPages, prev + 1))}
+                              className="product-pagination-btn"
+                            >
+                              ??
+                            </button>
+                          </div>
                         </div>
                       )}
                     </div>
