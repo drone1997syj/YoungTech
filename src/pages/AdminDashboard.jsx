@@ -1094,20 +1094,20 @@ export default function AdminDashboard() {
                     <div className="card p-4 flex flex-col gap-3 bg-white rounded-xl border">
                       <div className="flex items-center justify-between gap-3 flex-wrap">
                         <div>
-                          <h4 className="text-sm font-extrabold text-dark">?? ??? ??</h4>
-                          <p className="text-3xs text-light mt-1">?? ????? ??? ???? ??? ????? ?? ? ????.</p>
+                          <h4 className="text-sm font-extrabold text-dark">모터 브랜드 관리</h4>
+                          <p className="text-3xs text-light mt-1">모터 카테고리에 노출할 브랜드만 추가하거나 숨길 수 있습니다.</p>
                         </div>
                         <form onSubmit={handleAddMotorBrand} className="flex items-center gap-2 flex-wrap">
                           <input
                             type="text"
                             value={newMotorBrandName}
                             onChange={(e) => setNewMotorBrandName(e.target.value)}
-                            placeholder="???? ??"
+                            placeholder="브랜드명"
                             className="form-input text-xs py-2 px-3 border rounded-lg bg-white"
                             style={{ minWidth: '180px' }}
                           />
                           <button type="submit" className="btn btn-primary py-2 px-3 text-xs font-bold flex items-center gap-1">
-                            <Plus size={14} /> ??
+                            <Plus size={14} /> 추가
                           </button>
                         </form>
                       </div>
@@ -1130,16 +1130,16 @@ export default function AdminDashboard() {
                                 type="button"
                                 onClick={() => handleRemoveMotorBrand(brandId, brandName)}
                                 className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-white/70 text-violet-500 hover:bg-violet-100"
-                                aria-label={`${brandName} ???`}
-                                title="???"
+                                aria-label={`${brandName} 숨기기`}
+                                title="숨기기"
                               >
-                                ?
+                                ×
                               </button>
                             </span>
                           );
                         })}
                         {(!motorBrands || motorBrands.length === 0) && (
-                          <div className="text-xs text-light">??? ?? ???? ????.</div>
+                          <div className="text-xs text-light">등록된 모터 브랜드가 없습니다.</div>
                         )}
                       </div>
                     </div>
