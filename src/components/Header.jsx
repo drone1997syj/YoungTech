@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useShop } from '../context/ShopContext';
 import { Search, ShoppingCart, User, MessageSquare, ArrowLeftRight, LogOut, Cpu } from 'lucide-react';
 import './Header.css';
@@ -17,6 +17,18 @@ export default function Header() {
   } = useShop();
 
   const [searchInput, setSearchInput] = useState('');
+  const topLevelCategories = useMemo(
+    () => (categories || [])
+      .filter((cat) => !String(cat.parent_id ?? '').trim())
+      .slice()
+      .sort((a, b) => {
+        const aOrder = Number(a.sort_order || 0);
+        const bOrder = Number(b.sort_order || 0);
+        if (aOrder !== bOrder) return aOrder - bOrder;
+        return String(a.name || '').localeCompare(String(b.name || ''), 'ko');
+      }),
+    [categories]
+  );
 
   const cartCount = cart.reduce((sum, item) => sum + item.quantity, 0);
   const displayName = user?.name?.trim() || user?.email?.split('@')[0] || '고객';
@@ -145,7 +157,7 @@ export default function Header() {
           <button onClick={() => handleCategoryClick('all')} className="nav-item">
             전체 상품
           </button>
-          {categories && categories.map(cat => (
+          {topLevelCategories.map(cat => (
             <button key={cat.id} onClick={() => handleCategoryClick(cat.id)} className="nav-item">
               {cat.name}
             </button>

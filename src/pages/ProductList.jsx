@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
 import { useShop } from '../context/ShopContext';
 import ProductCompare from '../components/ProductCompare';
 import { ArrowLeftRight, Search, ShoppingCart } from 'lucide-react';
@@ -123,14 +123,16 @@ export default function ProductList() {
     categories
   } = useShop();
 
-  const [showSidebarMobile, setShowSidebarMobile] = useState(true);
-
   const activeProducts = useMemo(
     () => (products || []).filter((product) => product.is_active !== false && product.is_active !== 0),
     [products]
   );
 
   const { tree, lookup } = useMemo(() => buildCategoryTree(categories || []), [categories]);
+  const topLevelCategories = useMemo(
+    () => tree,
+    [tree]
+  );
 
   const descendantIds = useMemo(() => {
     if (activeCategory === 'all') return null;
@@ -182,16 +184,9 @@ export default function ProductList() {
       <ProductCompare />
 
       <div className="product-list-shell container">
-        <aside className={`category-card ${showSidebarMobile ? 'open' : ''}`}>
+        <aside className="category-card">
           <div className="category-card-head">
             <h4>카테고리</h4>
-            <button
-              type="button"
-              className="category-card-toggle"
-              onClick={() => setShowSidebarMobile((prev) => !prev)}
-            >
-              {showSidebarMobile ? '접기' : '펼치기'}
-            </button>
           </div>
           <button
             type="button"
@@ -201,7 +196,7 @@ export default function ProductList() {
             전체 상품
           </button>
           <div className="category-tree">
-            {tree.map((node) => (
+            {topLevelCategories.map((node) => (
               <CategoryNode
                 key={node.id}
                 node={node}
@@ -216,11 +211,8 @@ export default function ProductList() {
         <main className="product-list-main">
           <section className="list-hero-card">
             <div className="list-hero-copy">
-              <span className="list-hero-kicker">B2B FA PARTS</span>
               <h2>{currentCategoryName}</h2>
-              <p>카테고리를 선택하면 해당 상품만 깔끔하게 확인할 수 있습니다.</p>
             </div>
-            <div className="list-hero-count">{filteredProducts.length}개</div>
           </section>
 
           {filteredProducts.length > 0 ? (
