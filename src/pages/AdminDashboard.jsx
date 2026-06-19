@@ -77,6 +77,7 @@ export default function AdminDashboard() {
   const [categoryDeletedIds, setCategoryDeletedIds] = useState([]);
   const [categoryDirty, setCategoryDirty] = useState(false);
   const [savingCategories, setSavingCategories] = useState(false);
+  const [expandedCategoryIds, setExpandedCategoryIds] = useState(() => new Set());
 
   useEffect(() => {
     if (!categoryDirty) {
@@ -373,6 +374,18 @@ export default function AdminDashboard() {
   const markCategoryDirty = () => {
     setCategoryDirty(true);
     setCatSuccess('');
+  };
+
+  const toggleCategoryExpanded = (categoryId) => {
+    setExpandedCategoryIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(categoryId)) {
+        next.delete(categoryId);
+      } else {
+        next.add(categoryId);
+      }
+      return next;
+    });
   };
 
   const createCategoryIdFromName = (name) => {
@@ -2087,25 +2100,14 @@ export default function AdminDashboard() {
                       </div>
 
                       <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={handleAddCategoryDraft}
-                          className="btn btn-primary flex-1 py-2 text-xs font-bold"
-                        >
-                          추가
-                        </button>
-                        <button
-                          type="button"
-                          onClick={handleSaveCategories}
-                          disabled={!categoryDirty || savingCategories}
-                          className={`btn btn-secondary flex-1 py-2 text-xs font-bold ${!categoryDirty ? 'opacity-50 cursor-not-allowed' : ''}`}
-                        >
-                          {savingCategories ? '저장 중...' : '저장'}
-                        </button>
-                      </div>
-                      <p className="text-2xs text-light mt-3 leading-relaxed">
-                        추가, 수정, 삭제, 순서 변경은 저장 버튼을 눌러야 실제 홈페이지에 반영됩니다.
-                      </p>
+                          <button
+                            type="button"
+                            onClick={handleAddCategoryDraft}
+                            className="btn btn-primary py-2 px-4 text-xs font-bold w-fit"
+                          >
+                            추가
+                          </button>
+                        </div>
                     </div>
 
                     <div className="card p-5">
@@ -2124,6 +2126,8 @@ export default function AdminDashboard() {
                             const parentLabel = item.parent_id ? (categoryLookup.get(item.parent_id)?.name || item.parent_id) : '최상위';
                             const blockedParents = new Set([item.id, ...getCategoryDescendantIds(localCategories, item.id)]);
                             const isEditing = editingCatId === item.id;
+                            const isExpanded = expandedCategoryIds.has(item.id);
+                            const hasChildren = children.length > 0;
 
                             return (
                               <div key={item.id} className={`admin-category-node ${draggedCategoryId === item.id ? 'dragging' : ''}`}>
@@ -2139,7 +2143,33 @@ export default function AdminDashboard() {
                                     <GripVertical size={14} />
                                   </button>
                                   <div className="admin-category-node-main">
-                                    <div className="admin-category-node-title">{item.name}</div>
+                                    <div className="admin-category-node-title-row">
+                                      {hasChildren ? (
+                                        <button
+                                          type="button"
+                                          className={`admin-category-expand ${isExpanded ? 'is-open' : ''}`}
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            toggleCategoryExpanded(item.id);
+                                          }}
+                                          aria-label={isExpanded ? '하위 품목 접기' : '하위 품목 펼치기'}
+                                        >
+                                          <ChevronRight size={13} />
+                                        </button>
+                                      ) : (
+                                        <span className="admin-category-expand-spacer" />
+                                      )}
+                                      <button
+                                        type="button"
+                                        className="admin-category-node-title-button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          if (hasChildren) toggleCategoryExpanded(item.id);
+                                        }}
+                                      >
+                                        {item.name}
+                                      </button>
+                                    </div>
                                     <div className="admin-category-node-meta">
                                       <span>{item.id}</span>
                                       <span>상위: {parentLabel}</span>
@@ -2217,7 +2247,7 @@ export default function AdminDashboard() {
                                   </div>
                                 )}
 
-                                {children.length > 0 && (
+                                {hasChildren && isExpanded && (
                                   <div className="admin-category-children">
                                     {children.map((child) => renderNode(child, depth + 1))}
                                   </div>
@@ -2241,7 +2271,7 @@ export default function AdminDashboard() {
                           type="button"
                           onClick={handleSaveCategories}
                           disabled={!categoryDirty || savingCategories}
-                          className={`btn btn-primary py-2 px-5 text-xs font-bold ${!categoryDirty ? 'opacity-50 cursor-not-allowed' : ''}`}
+                          className={`btn btn-primary py-2 px-8 min-w-[160px] text-xs font-bold ${!categoryDirty ? 'opacity-50 cursor-not-allowed' : ''}`}
                         >
                           {savingCategories ? '저장 중...' : '저장'}
                         </button>
