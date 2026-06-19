@@ -1303,90 +1303,130 @@ export default function AdminDashboard() {
                       </div>
                     </div>
 
-                    <div className="table-responsive card p-4">
-                      <table className="admin-table admin-product-table w-full text-left border-collapse">
-                        <thead>
-                          <tr className="border-b text-xs text-light font-bold">
-                            <th className="py-3 px-2 w-8">
-                              <input 
-                                type="checkbox" 
-                                checked={isAllSelected} 
-                                onChange={handleSelectAll} 
-                                className="cursor-pointer"
-                              />
-                            </th>
-                            <th className="py-3 px-2 text-center">??</th>
-                            <th className="py-3 px-2 text-center">??</th>
-                            <th className="py-3 px-2">???</th>
-                            <th className="py-3 px-2 text-center">????</th>
-                            <th className="py-3 px-2 text-right">???</th>
-                            <th className="py-3 px-2 text-right">????</th>
-                            <th className="py-3 px-2">??????</th>
-                            <th className="py-3 px-2">?????</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {paginatedProducts.length > 0 ? (
-                            paginatedProducts.map(p => {
-                              const statusLabel = (p.is_active === false || p.is_active === 0)
-                                ? '????'
-                                : Number(p.stock || 0) <= 0
-                                  ? '??'
-                                  : '???';
-                              const statusClass = statusLabel === '???'
-                                ? 'status-on'
-                                : statusLabel === '??'
-                                  ? 'status-soldout'
-                                  : 'status-stop';
-                              return (
-                                <tr key={p.id} className="border-b text-sm text-dark hover:bg-slate-50">
-                                  <td className="py-3 px-2">
-                                    <input 
-                                      type="checkbox" 
-                                      checked={selectedProdIds.includes(p.id)} 
-                                      onChange={() => handleSelectRow(p.id)}
-                                      className="cursor-pointer w-4 h-4"
-                                    />
-                                  </td>
-                                  <td className="py-3 px-2 text-center">
-                                    <button 
-                                      onClick={() => openEditModal(p)} 
-                                      className="btn btn-secondary py-1 px-3 text-2xs font-bold"
-                                    >
-                                      ??
-                                    </button>
-                                  </td>
-                                  <td className="py-3 px-2 text-center">
-                                    <button 
-                                      onClick={() => handleCopyProduct(p)} 
-                                      className="btn btn-secondary py-1 px-3 text-2xs font-bold"
-                                    >
-                                      ??
-                                    </button>
-                                  </td>
-                                  <td className="py-3 px-2">
-                                    <div className="flex flex-col gap-1">
-                                      <span className="font-bold text-base text-dark">{p.name}</span>
-                                      <span className="text-xs text-slate-500">{(categories.find(c => c.id === p.category) || {}).name || p.category}</span>
-                                    </div>
-                                  </td>
-                                  <td className="py-3 px-2 text-center">
-                                    <span className={`product-status-chip ${statusClass}`}>{statusLabel}</span>
-                                  </td>
-                                  <td className="py-3 px-2 text-right font-bold text-base">{Number(p.price || 0).toLocaleString()}?</td>
-                                  <td className="py-3 px-2 text-right font-bold text-base">{Number(p.stock || 0).toLocaleString()}?</td>
-                                  <td className="py-3 px-2 text-sm text-light">{p.created_at ? formatOrderDateTime(p.created_at) : '-'}</td>
-                                  <td className="py-3 px-2 text-sm text-light">{p.updated_at ? formatOrderDateTime(p.updated_at) : '-'}</td>
-                                </tr>
-                              );
-                            })
-                          ) : (
-                            <tr>
-                              <td colSpan="9" className="text-center py-6 text-sm text-light">?? ??? ??? ??? ????.</td>
+                    <div className="product-table-shell card p-0 overflow-hidden">
+                      <div className="product-table-headbar">
+                        <div className="product-table-headline">
+                          <strong>상품 목록</strong>
+                          <span>네이버스토어처럼 빠르게 찾고, 수정하고, 정리할 수 있게 구성했습니다.</span>
+                        </div>
+                        <div className="product-table-headmeta">
+                          <span>현재 {paginatedProducts.length}개 표시</span>
+                          <span>전체 {sortedProducts.length}개</span>
+                        </div>
+                      </div>
+
+                      <div className="table-responsive product-table-wrap">
+                        <table className="admin-table admin-product-table product-admin-table w-full text-left border-collapse">
+                          <colgroup>
+                            <col style={{ width: '42px' }} />
+                            <col style={{ width: '74px' }} />
+                            <col style={{ width: '74px' }} />
+                            <col />
+                            <col style={{ width: '120px' }} />
+                            <col style={{ width: '130px' }} />
+                            <col style={{ width: '110px' }} />
+                            <col style={{ width: '160px' }} />
+                            <col style={{ width: '160px' }} />
+                          </colgroup>
+                          <thead>
+                            <tr className="border-b text-xs text-light font-bold">
+                              <th className="py-3 px-2 w-8 text-center">
+                                <input
+                                  type="checkbox"
+                                  checked={isAllSelected}
+                                  onChange={handleSelectAll}
+                                  className="cursor-pointer"
+                                />
+                              </th>
+                              <th className="py-3 px-2 text-center">수정</th>
+                              <th className="py-3 px-2 text-center">복사</th>
+                              <th className="py-3 px-2">상품명</th>
+                              <th className="py-3 px-2 text-center">판매상태</th>
+                              <th className="py-3 px-2 text-right">판매가</th>
+                              <th className="py-3 px-2 text-right">재고수량</th>
+                              <th className="py-3 px-2">상품등록일시</th>
+                              <th className="py-3 px-2">상품수정일</th>
                             </tr>
-                          )}
-                        </tbody>
-                      </table>
+                          </thead>
+                          <tbody>
+                            {paginatedProducts.length > 0 ? (
+                              paginatedProducts.map((p) => {
+                                const statusMeta = getProductStatusMeta(p);
+                                const productCategoryName = getProductCategoryName(p);
+                                const productBrandName = String(p.brand || '').trim();
+                                return (
+                                  <tr key={p.id} className="border-b text-sm text-dark hover:bg-slate-50 product-row">
+                                    <td className="py-3 px-2 text-center">
+                                      <input
+                                        type="checkbox"
+                                        checked={selectedProdIds.includes(p.id)}
+                                        onChange={() => handleSelectRow(p.id)}
+                                        className="cursor-pointer w-4 h-4"
+                                      />
+                                    </td>
+                                    <td className="py-3 px-2 text-center">
+                                      <button
+                                        onClick={() => openEditModal(p)}
+                                        className="product-action-btn primary"
+                                        title="상품 수정"
+                                      >
+                                        수정
+                                      </button>
+                                    </td>
+                                    <td className="py-3 px-2 text-center">
+                                      <button
+                                        onClick={() => handleCopyProduct(p)}
+                                        className="product-action-btn"
+                                        title="상품 복사"
+                                      >
+                                        복사
+                                      </button>
+                                    </td>
+                                    <td className="py-3 px-2">
+                                      <div className="product-name-cell">
+                                        <span className="product-name">{p.name}</span>
+                                        <div className="product-meta-line">
+                                          {productCategoryName && (
+                                            <span className="product-meta-pill">{productCategoryName}</span>
+                                          )}
+                                          {productBrandName && (
+                                            <span className="product-meta-pill brand">{productBrandName}</span>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </td>
+                                    <td className="py-3 px-2 text-center">
+                                      <span className={`product-status-chip ${statusMeta.className}`}>{statusMeta.label}</span>
+                                    </td>
+                                    <td className="py-3 px-2 text-right">
+                                      <span className="product-price-value">{Number(p.price || 0).toLocaleString()}원</span>
+                                    </td>
+                                    <td className="py-3 px-2 text-right">
+                                      <span className="product-stock-value">{Number(p.stock || 0).toLocaleString()}개</span>
+                                    </td>
+                                    <td className="py-3 px-2 text-sm text-light">
+                                      <div className="product-date-cell">
+                                        <span>{p.created_at ? formatOrderDateTime(p.created_at) : '-'}</span>
+                                      </div>
+                                    </td>
+                                    <td className="py-3 px-2 text-sm text-light">
+                                      <div className="product-date-cell">
+                                        <span>{p.updated_at ? formatOrderDateTime(p.updated_at) : '-'}</span>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              })
+                            ) : (
+                              <tr>
+                                <td colSpan="9" className="text-center py-8 text-sm text-light">
+                                  표시할 상품이 없습니다.
+                                </td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
 
                       {totalPages > 1 && (
                         <div className="flex justify-center items-center gap-2 mt-6 pt-4 border-t flex-wrap">
