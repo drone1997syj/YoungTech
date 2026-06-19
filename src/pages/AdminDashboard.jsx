@@ -75,10 +75,16 @@ export default function AdminDashboard() {
   const [editingCatName, setEditingCatName] = useState('');
   const [editingCatParentId, setEditingCatParentId] = useState('');
   const [localCategories, setLocalCategories] = useState([]);
+  const [categoryDeletedIds, setCategoryDeletedIds] = useState([]);
+  const [categoryDirty, setCategoryDirty] = useState(false);
+  const [savingCategories, setSavingCategories] = useState(false);
 
   useEffect(() => {
-    setLocalCategories(categories);
-  }, [categories]);
+    if (!categoryDirty) {
+      setLocalCategories(categories);
+      setCategoryDeletedIds([]);
+    }
+  }, [categories, categoryDirty]);
 
   const normalizeCategoryParentId = (value) => {
     const text = String(value ?? '').trim();
@@ -331,7 +337,7 @@ export default function AdminDashboard() {
     return reorderGroup(cloneNodes(nodes));
   };
 
-  const handleCategoryDrop = async (targetId) => {
+  const handleCategoryDrop = (targetId) => {
     if (!draggedCategoryId || draggedCategoryId === targetId) {
       setDraggedCategoryId(null);
       return;
@@ -345,18 +351,14 @@ export default function AdminDashboard() {
     }
 
     const reorderedTree = moveCategoryBeforeTarget(categoryTree, draggedCategoryId, targetId);
-    const payload = { items: flattenCategoryTree(reorderedTree) };
-    const res = await reorderCategories(payload);
-    if (res?.success !== false) {
-      const flat = flattenCategoryTree(reorderedTree);
-      const byId = new Map(localCategories.map((cat) => [cat.id, cat]));
-      setLocalCategories(flat.map((item) => ({
-        ...byId.get(item.id),
-        parent_id: normalizeCategoryParentId(item.parent_id),
-        sort_order: item.sort_order
-      })));
-    }
-
+    const flat = flattenCategoryTree(reorderedTree);
+    const byId = new Map(localCategories.map((cat) => [cat.id, cat]));
+    setLocalCategories(flat.map((item) => ({
+      ...byId.get(item.id),
+      parent_id: normalizeCategoryParentId(item.parent_id),
+      sort_order: item.sort_order
+    })));
+    markCategoryDirty();
     setDraggedCategoryId(null);
   };
 
@@ -367,6 +369,164 @@ export default function AdminDashboard() {
   const categoryTreeData = buildCategoryTree(localCategories);
   const categoryTree = categoryTreeData.tree;
   const categoryLookup = categoryTreeData.lookup;
+
+  const markCategoryDirty = () => {
+    setCategoryDirty(true);
+    setCatSuccess('');
+  };
+
+  const handleAddCategoryDraft = () => {
+    const id = newCatId.trim();
+    const name = newCatName.trim();
+    const parentId = normalizeCategoryParentId(newCatParentId);
+    if (!id || !name) {
+      setCatError('카테고리 ID와 이름을 입력해 주세요.');
+      return;
+    }
+    if (localCategories.some((cat) => cat.id === id) || categories.some((cat) => cat.id === id)) {
+      setCatError('이미 사용 중인 카테고리 ID입니다.');
+      return;
+    }
+    if (parentId && !localCategories.some((cat) => cat.id === parentId)) {
+      setCatError('상위 카테고리를 찾을 수 없습니다.');
+      return;
+    }
+
+    const siblingCount = localCategories.filter((cat) => normalizeCategoryParentId(cat.parent_id) === parentId).length;
+    setLocalCategories(prev => [
+      ...prev,
+      {
+        id,
+        name,
+        parent_id: parentId,
+        sort_order: siblingCount + 1,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }
+    ]);
+    setNewCatId('');
+    setNewCatName('');
+    setNewCatParentId('');
+    setCatError('');
+    markCategoryDirty();
+  };
+
+  const handleUpdateCategoryDraft = (id) => {
+    const name = editingCatName.trim();
+    const parentId = normalizeCategoryParentId(editingCatParentId);
+    if (!name) {
+      setCatError('카테고리 이름을 입력해 주세요.');
+      return;
+    }
+    if (parentId === id) {
+      setCatError('자기 자신을 상위 카테고리로 지정할 수 없습니다.');
+      return;
+    }
+
+    setLocalCategories(prev => prev.map((cat) => (
+      cat.id === id
+        ? { ...cat, name, parent_id: parentId, updated_at: new Date().toISOString() }
+        : cat
+    )));
+    setEditingCatId(null);
+    setEditingCatName('');
+    setEditingCatParentId('');
+    setCatError('');
+    markCategoryDirty();
+  };
+
+  const handleDeleteCategoryDraft = (item) => {
+    const hasChildren = localCategories.some((cat) => normalizeCategoryParentId(cat.parent_id) === item.id);
+    if (hasChildren) {
+      setCatError('하위 카테고리가 있는 항목은 먼저 하위 항목을 정리해 주세요.');
+      return;
+    }
+    const hasProducts = products.some((product) => product.category === item.id && product.is_deleted !== true && product.is_deleted !== 1);
+    if (hasProducts) {
+      setCatError('상품이 연결된 카테고리는 삭제할 수 없습니다. 상품 카테고리를 먼저 변경해 주세요.');
+      return;
+    }
+    if (!window.confirm(`'${item.name}' 카테고리를 삭제 목록에 넣을까요? 저장 버튼을 눌러야 실제 삭제됩니다.`)) {
+      return;
+    }
+    if (categories.some((cat) => cat.id === item.id)) {
+      setCategoryDeletedIds(prev => [...new Set([...prev, item.id])]);
+    }
+    setLocalCategories(prev => prev.filter((cat) => cat.id !== item.id));
+    setCatError('');
+    markCategoryDirty();
+  };
+
+  const handleResetCategoryDraft = () => {
+    setLocalCategories(categories);
+    setCategoryDeletedIds([]);
+    setCategoryDirty(false);
+    setEditingCatId(null);
+    setCatError('');
+    setCatSuccess('저장되지 않은 변경사항을 되돌렸습니다.');
+  };
+
+  const getCategoryDepth = (categoryId, list = localCategories) => {
+    const byId = new Map(list.map((cat) => [cat.id, cat]));
+    let depth = 0;
+    let current = byId.get(categoryId);
+    const seen = new Set();
+    while (current && normalizeCategoryParentId(current.parent_id) && !seen.has(current.id)) {
+      seen.add(current.id);
+      depth += 1;
+      current = byId.get(normalizeCategoryParentId(current.parent_id));
+    }
+    return depth;
+  };
+
+  const handleSaveCategories = async () => {
+    setSavingCategories(true);
+    setCatError('');
+    setCatSuccess('');
+    try {
+      const originalIds = new Set(categories.map((cat) => cat.id));
+      const localIds = new Set(localCategories.map((cat) => cat.id));
+      const deletedIds = categoryDeletedIds.filter((id) => originalIds.has(id) && !localIds.has(id));
+      const newItems = localCategories
+        .filter((cat) => !originalIds.has(cat.id))
+        .sort((a, b) => getCategoryDepth(a.id) - getCategoryDepth(b.id));
+      const existingItems = localCategories.filter((cat) => originalIds.has(cat.id));
+
+      for (const item of newItems) {
+        const res = await createCategory(item.id, item.name, item.parent_id || null);
+        if (!res.success) throw new Error(res.message || `${item.name} 추가 실패`);
+      }
+
+      for (const item of existingItems) {
+        const original = categories.find((cat) => cat.id === item.id);
+        if (
+          original &&
+          (original.name !== item.name || normalizeCategoryParentId(original.parent_id) !== normalizeCategoryParentId(item.parent_id))
+        ) {
+          const res = await updateCategory(item.id, item.name, item.parent_id || null);
+          if (!res.success) throw new Error(res.message || `${item.name} 수정 실패`);
+        }
+      }
+
+      const reorderPayload = { items: flattenCategoryTree(buildCategoryTree(localCategories).tree) };
+      const reorderRes = await reorderCategories(reorderPayload);
+      if (reorderRes?.success === false) throw new Error(reorderRes.message || '순서 저장 실패');
+
+      for (const id of deletedIds) {
+        const res = await deleteCategory(id);
+        if (!res.success) throw new Error(res.message || `${id} 삭제 실패`);
+      }
+
+      setCategoryDeletedIds([]);
+      setCategoryDirty(false);
+      await fetchProducts(true);
+      setCatSuccess('품목 변경사항을 저장했습니다.');
+    } catch (err) {
+      setCatError(err.message || '품목 저장 중 오류가 발생했습니다.');
+    } finally {
+      setSavingCategories(false);
+    }
+  };
 
   // Product Reorder actions
   const handleProductMoveUp = async (product, index, allProductsInCategory) => {
@@ -1133,6 +1293,15 @@ export default function AdminDashboard() {
                       return new Date(product.created_at || 0).getTime();
                   }
                 };
+                const getProductStatusMeta = (product) => {
+                  if (product.is_active === false || product.is_active === 0) {
+                    return { label: '판매중지', className: 'status-stop' };
+                  }
+                  if (Number(product.stock || 0) <= 0) {
+                    return { label: '품절', className: 'status-soldout' };
+                  }
+                  return { label: '판매중', className: 'status-on' };
+                };
                 const sortedProducts = [...filteredProducts].sort((a, b) => {
                   const aValue = getProductSortValue(a);
                   const bValue = getProductSortValue(b);
@@ -1838,15 +2007,35 @@ export default function AdminDashboard() {
                 <div className="tab-categories flex flex-col gap-6">
                   <div className="flex items-end justify-between gap-4 flex-wrap">
                     <div>
-                      <h3 className="font-extrabold text-dark text-lg">???? ??</h3>
-                      <p className="text-xs text-light mt-1">?? ???? ??? ?? ? ??, ?? ?? ???? ??? ? ???? ??? ?? ? ????.</p>
+                      <h3 className="font-extrabold text-dark text-lg">품목 관리</h3>
+                      <p className="text-xs text-light mt-1">전체 카테고리의 하위 품목을 추가, 수정, 삭제하고 순서를 정리합니다.</p>
                     </div>
-                    <div className="text-xs text-light font-medium">? {categories.length}?</div>
+                    <div className="flex items-center gap-2">
+                      {categoryDirty && (
+                        <span className="text-xs font-bold text-amber-600">저장되지 않은 변경사항 있음</span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={handleResetCategoryDraft}
+                        disabled={!categoryDirty || savingCategories}
+                        className="btn btn-secondary py-2 px-3 text-xs font-bold"
+                      >
+                        되돌리기
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleSaveCategories}
+                        disabled={!categoryDirty || savingCategories}
+                        className={`btn btn-primary py-2 px-4 text-xs font-bold ${!categoryDirty ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      >
+                        {savingCategories ? '저장 중...' : '변경사항 저장'}
+                      </button>
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-1 lg:grid-cols-[320px_minmax(0,1fr)] gap-6">
                     <div className="card p-5 h-fit">
-                      <h4 className="font-bold text-dark text-sm mb-4">???? ??</h4>
+                      <h4 className="font-bold text-dark text-sm mb-4">하위 품목 추가</h4>
 
                       {catError && (
                         <div className="alert-box alert-danger mb-3 text-xs font-semibold flex items-center gap-1">
@@ -1860,35 +2049,35 @@ export default function AdminDashboard() {
                       )}
 
                       <div className="form-group mb-3">
-                        <label className="form-label text-xs font-bold mb-1">???? ?? ID *</label>
+                        <label className="form-label text-xs font-bold mb-1">품목 ID *</label>
                         <input
                           type="text"
                           className="form-input text-xs"
                           value={newCatId}
                           onChange={(e) => setNewCatId(e.target.value)}
-                          placeholder="?: motor-servo"
+                          placeholder="예: motor-servo"
                         />
                       </div>
 
                       <div className="form-group mb-3">
-                        <label className="form-label text-xs font-bold mb-1">???? ?? *</label>
+                        <label className="form-label text-xs font-bold mb-1">품목명 *</label>
                         <input
                           type="text"
                           className="form-input text-xs"
                           value={newCatName}
                           onChange={(e) => setNewCatName(e.target.value)}
-                          placeholder="?: ????"
+                          placeholder="예: 서보모터"
                         />
                       </div>
 
                       <div className="form-group mb-4">
-                        <label className="form-label text-xs font-bold mb-1">?? ????</label>
+                        <label className="form-label text-xs font-bold mb-1">상위 품목</label>
                         <select
                           className="form-select text-xs"
                           value={newCatParentId}
                           onChange={(e) => setNewCatParentId(e.target.value)}
                         >
-                          <option value="">??? ????</option>
+                          <option value="">최상위 품목</option>
                           {localCategories.map((cat) => (
                             <option key={cat.id} value={cat.id}>
                               {(categoryLookup.get(cat.id)?.name || cat.name)}
@@ -1898,43 +2087,31 @@ export default function AdminDashboard() {
                       </div>
 
                       <button
-                        onClick={async () => {
-                          setCatError('');
-                          setCatSuccess('');
-                          if (!newCatId.trim() || !newCatName.trim()) {
-                            setCatError('?? ID? ??? ?? ??? ???.');
-                            return;
-                          }
-                          const res = await createCategory(newCatId.trim(), newCatName.trim(), newCatParentId || null);
-                          if (res.success) {
-                            setCatSuccess('????? ???????.');
-                            setNewCatId('');
-                            setNewCatName('');
-                            setNewCatParentId('');
-                          } else {
-                            setCatError(res.message || '?? ??');
-                          }
-                        }}
+                        type="button"
+                        onClick={handleAddCategoryDraft}
                         className="btn btn-primary w-full py-2 text-xs font-bold"
                       >
-                        ???? ??
+                        추가
                       </button>
+                      <p className="text-2xs text-light mt-3 leading-relaxed">
+                        추가, 수정, 삭제, 순서 변경은 저장 버튼을 눌러야 실제 홈페이지에 반영됩니다.
+                      </p>
                     </div>
 
                     <div className="card p-5">
                       <div className="flex items-center justify-between gap-3 mb-4">
                         <div>
-                          <h4 className="font-bold text-dark text-sm">???? ??</h4>
-                          <p className="text-xs text-light mt-1">?? ?? ????? ??? ???? ?? ? ????.</p>
+                          <h4 className="font-bold text-dark text-sm">품목 목록</h4>
+                          <p className="text-xs text-light mt-1">드래그로 같은 단계 안에서 순서를 바꿀 수 있습니다.</p>
                         </div>
-                        <span className="text-2xs text-light font-bold">??? ? ?? ??</span>
+                        <span className="text-2xs text-light font-bold">총 {localCategories.length}개</span>
                       </div>
 
                       <div className="admin-category-tree">
                         {categoryTree.map((node) => {
                           const renderNode = (item, depth = 0) => {
                             const children = Array.isArray(item.children) ? item.children : [];
-                            const parentLabel = item.parent_id ? (categoryLookup.get(item.parent_id)?.name || item.parent_id) : '???';
+                            const parentLabel = item.parent_id ? (categoryLookup.get(item.parent_id)?.name || item.parent_id) : '최상위';
                             const blockedParents = new Set([item.id, ...getCategoryDescendantIds(localCategories, item.id)]);
                             const isEditing = editingCatId === item.id;
 
@@ -1949,15 +2126,15 @@ export default function AdminDashboard() {
                                   onDragEnd={handleCategoryDragEnd}
                                   style={{ paddingLeft: `${depth * 18}px` }}
                                 >
-                                  <button type="button" className="admin-category-drag-handle" aria-label="????? ?? ??">
+                                  <button type="button" className="admin-category-drag-handle" aria-label="품목 순서 변경">
                                     <GripVertical size={14} />
                                   </button>
                                   <div className="admin-category-node-main">
                                     <div className="admin-category-node-title">{item.name}</div>
                                     <div className="admin-category-node-meta">
                                       <span>{item.id}</span>
-                                      <span>??: {parentLabel}</span>
-                                      <span>?? {children.length}?</span>
+                                      <span>상위: {parentLabel}</span>
+                                      <span>하위 {children.length}개</span>
                                     </div>
                                   </div>
                                   <div className="admin-category-node-actions">
@@ -1970,23 +2147,14 @@ export default function AdminDashboard() {
                                       }}
                                       className="admin-mini-action"
                                     >
-                                      ??
+                                      수정
                                     </button>
                                     <button
                                       type="button"
-                                      onClick={async () => {
-                                        if (window.confirm(`??? '${item.name}' ????? ?????????`)) {
-                                          const res = await deleteCategory(item.id);
-                                          if (res.success) {
-                                            alert('????? ???????.');
-                                          } else {
-                                            alert(res.message);
-                                          }
-                                        }
-                                      }}
+                                      onClick={() => handleDeleteCategoryDraft(item)}
                                       className="admin-mini-action danger"
                                     >
-                                      ??
+                                      삭제
                                     </button>
                                   </div>
                                 </div>
@@ -1995,7 +2163,7 @@ export default function AdminDashboard() {
                                   <div className="admin-category-edit-panel" style={{ paddingLeft: `${depth * 18 + 34}px` }}>
                                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
                                       <div>
-                                        <label className="form-label text-2xs font-bold mb-1">??</label>
+                                        <label className="form-label text-2xs font-bold mb-1">품목명</label>
                                         <input
                                           type="text"
                                           value={editingCatName}
@@ -2004,13 +2172,13 @@ export default function AdminDashboard() {
                                         />
                                       </div>
                                       <div>
-                                        <label className="form-label text-2xs font-bold mb-1">?? ????</label>
+                                        <label className="form-label text-2xs font-bold mb-1">상위 품목</label>
                                         <select
                                           value={editingCatParentId}
                                           onChange={(e) => setEditingCatParentId(e.target.value)}
                                           className="form-select text-xs"
                                         >
-                                          <option value="">??? ????</option>
+                                          <option value="">최상위 품목</option>
                                           {localCategories.filter((cat) => !blockedParents.has(cat.id)).map((cat) => (
                                             <option key={cat.id} value={cat.id}>{cat.name}</option>
                                           ))}
@@ -2019,23 +2187,10 @@ export default function AdminDashboard() {
                                       <div className="flex items-center gap-2">
                                         <button
                                           type="button"
-                                          onClick={async () => {
-                                            if (!editingCatName.trim()) {
-                                              alert('???? ??? ??? ???.');
-                                              return;
-                                            }
-                                            const res = await updateCategory(item.id, editingCatName.trim(), editingCatParentId || null);
-                                            if (res.success) {
-                                              setEditingCatId(null);
-                                              setEditingCatName('');
-                                              setEditingCatParentId('');
-                                            } else {
-                                              alert(res.message || '?? ??');
-                                            }
-                                          }}
+                                          onClick={() => handleUpdateCategoryDraft(item.id)}
                                           className="btn btn-primary py-2 px-3 text-xs font-bold"
                                         >
-                                          ??
+                                          적용
                                         </button>
                                         <button
                                           type="button"
@@ -2046,7 +2201,7 @@ export default function AdminDashboard() {
                                           }}
                                           className="btn btn-secondary py-2 px-3 text-xs font-bold"
                                         >
-                                          ??
+                                          취소
                                         </button>
                                       </div>
                                     </div>
@@ -2067,7 +2222,7 @@ export default function AdminDashboard() {
 
                         {categoryTree.length === 0 && (
                           <div className="admin-empty-state">
-                            ?? ??? ????? ????.
+                            등록된 품목이 없습니다.
                           </div>
                         )}
                       </div>
