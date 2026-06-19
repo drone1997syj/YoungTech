@@ -78,6 +78,7 @@ export default function AdminDashboard() {
   const [localCategories, setLocalCategories] = useState([]);
   const [newMotorBrandName, setNewMotorBrandName] = useState('');
   const [motorBrandMessage, setMotorBrandMessage] = useState('');
+  const [showMotorBrandManager, setShowMotorBrandManager] = useState(true);
 
   useEffect(() => {
     setLocalCategories(categories);
@@ -1094,54 +1095,69 @@ export default function AdminDashboard() {
                     <div className="card p-4 flex flex-col gap-3 bg-white rounded-xl border">
                       <div className="flex items-center justify-between gap-3 flex-wrap">
                         <div>
-                          <h4 className="text-sm font-extrabold text-dark">모터 브랜드 관리</h4>
+                          <div className="flex items-center gap-2">
+                            <h4 className="text-sm font-extrabold text-dark">모터 브랜드 관리</h4>
+                            <button
+                              type="button"
+                              onClick={() => setShowMotorBrandManager(prev => !prev)}
+                              className="rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-2xs font-bold text-slate-500 hover:bg-slate-100"
+                            >
+                              {showMotorBrandManager ? '접기' : '펼치기'}
+                            </button>
+                          </div>
                           <p className="text-3xs text-light mt-1">모터 카테고리에 노출할 브랜드만 추가하거나 숨길 수 있습니다.</p>
                         </div>
-                        <form onSubmit={handleAddMotorBrand} className="flex items-center gap-2 flex-wrap">
-                          <input
-                            type="text"
-                            value={newMotorBrandName}
-                            onChange={(e) => setNewMotorBrandName(e.target.value)}
-                            placeholder="브랜드명"
-                            className="form-input text-xs py-2 px-3 border rounded-lg bg-white"
-                            style={{ minWidth: '180px' }}
-                          />
-                          <button type="submit" className="btn btn-primary py-2 px-3 text-xs font-bold flex items-center gap-1">
-                            <Plus size={14} /> 추가
-                          </button>
-                        </form>
-                      </div>
-
-                      {motorBrandMessage && (
-                        <div className="text-xs text-slate-500">{motorBrandMessage}</div>
-                      )}
-
-                      <div className="flex flex-wrap gap-2">
-                        {(motorBrands || []).map((brand) => {
-                          const brandId = brand.id || brand.name || brand;
-                          const brandName = brand.name || brand;
-                          return (
-                            <span
-                              key={brandId}
-                              className="inline-flex items-center gap-1 rounded-full bg-violet-50 text-violet-700 border border-violet-100 px-3 py-1 text-xs font-bold"
-                            >
-                              {brandName}
-                              <button
-                                type="button"
-                                onClick={() => handleRemoveMotorBrand(brandId, brandName)}
-                                className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-white/70 text-violet-500 hover:bg-violet-100"
-                                aria-label={`${brandName} 숨기기`}
-                                title="숨기기"
-                              >
-                                ×
-                              </button>
-                            </span>
-                          );
-                        })}
-                        {(!motorBrands || motorBrands.length === 0) && (
-                          <div className="text-xs text-light">등록된 모터 브랜드가 없습니다.</div>
+                        {showMotorBrandManager && (
+                          <form onSubmit={handleAddMotorBrand} className="flex items-center gap-2 flex-wrap">
+                            <input
+                              type="text"
+                              value={newMotorBrandName}
+                              onChange={(e) => setNewMotorBrandName(e.target.value)}
+                              placeholder="브랜드명"
+                              className="form-input text-xs py-2 px-3 border rounded-lg bg-white"
+                              style={{ minWidth: '180px' }}
+                            />
+                            <button type="submit" className="btn btn-primary py-2 px-3 text-xs font-bold flex items-center gap-1">
+                              <Plus size={14} /> 추가
+                            </button>
+                          </form>
                         )}
                       </div>
+
+                      {showMotorBrandManager && (
+                        <>
+                          {motorBrandMessage && (
+                            <div className="text-xs text-slate-500">{motorBrandMessage}</div>
+                          )}
+
+                          <div className="flex flex-wrap gap-2">
+                            {(motorBrands || []).map((brand) => {
+                              const brandId = brand.id || brand.name || brand;
+                              const brandName = brand.name || brand;
+                              return (
+                                <span
+                                  key={brandId}
+                                  className="inline-flex items-center gap-1 rounded-full bg-violet-50 text-violet-700 border border-violet-100 px-3 py-1 text-xs font-bold"
+                                >
+                                  {brandName}
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemoveMotorBrand(brandId, brandName)}
+                                    className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-white/70 text-violet-500 hover:bg-violet-100"
+                                    aria-label={`${brandName} 숨기기`}
+                                    title="숨기기"
+                                  >
+                                    ×
+                                  </button>
+                                </span>
+                              );
+                            })}
+                            {(!motorBrands || motorBrands.length === 0) && (
+                              <div className="text-xs text-light">등록된 모터 브랜드가 없습니다.</div>
+                            )}
+                          </div>
+                        </>
+                      )}
                     </div>
                     {/* 필터 및 신규 등록 영역 */}
                     <div className="flex justify-between items-center gap-4 flex-wrap bg-white p-4 rounded-xl border">
