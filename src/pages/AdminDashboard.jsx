@@ -1327,9 +1327,13 @@ export default function AdminDashboard() {
 
               {/* Tab 2: Products */}
               {activeTab === 'products' && (() => {
+                const topLevelCategories = categoryTree;
+                const selectedCategoryDescendantIds = prodFilter === 'all'
+                  ? []
+                  : getCategoryDescendantIds(localCategories, prodFilter).map((id) => String(id));
                 const filteredProducts = prodFilter === 'all'
                   ? products
-                  : products.filter(p => p.category === prodFilter);
+                  : products.filter((p) => String(p.category) === String(prodFilter) || selectedCategoryDescendantIds.includes(String(p.category)));
 
                 const getProductCategoryName = (product) => {
                   const category = categories.find(c => c.id === product.category);
@@ -1432,7 +1436,7 @@ export default function AdminDashboard() {
                             style={{ width: '110px' }}
                           >
                             <option value="all">전체 보기</option>
-                            {categories && categories.map(cat => (
+                            {topLevelCategories && topLevelCategories.map(cat => (
                               <option key={cat.id} value={cat.id}>{cat.name}</option>
                             ))}
                           </select>
@@ -1490,7 +1494,7 @@ export default function AdminDashboard() {
                       <label htmlFor="product-csv-upload" className="btn btn-secondary py-2 px-3 text-xs flex items-center gap-1 cursor-pointer">
                         <Upload size={14} /> CSV 일괄 등록
                       </label>
-                      <button onClick={() => openAddModal(prodFilter !== 'all' ? prodFilter : (categories?.[0]?.id || 'motor'))} className="btn btn-primary py-2 px-3 text-xs flex items-center gap-1">
+                      <button onClick={() => openAddModal(prodFilter !== 'all' ? prodFilter : (topLevelCategories?.[0]?.id || 'motor'))} className="btn btn-primary py-2 px-3 text-xs flex items-center gap-1">
                         <Plus size={14} /> 신규 상품 등록
                       </button>
                     </div>
