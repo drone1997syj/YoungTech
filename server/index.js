@@ -1601,7 +1601,15 @@ app.post('/api/upload', requireAdmin, upload.single('image'), (req, res) => {
 // ==========================================
 app.get('/api/categories', async (req, res) => {
   try {
-    const [rows] = await pool.query('SELECT * FROM categories ORDER BY sort_order ASC, name ASC');
+    const [rows] = await pool.query(`
+      SELECT *
+      FROM categories
+      ORDER BY
+        CASE WHEN parent_id IS NULL OR parent_id = '' THEN 0 ELSE 1 END,
+        COALESCE(parent_id, ''),
+        sort_order ASC,
+        name ASC
+    `);
     res.json(rows);
   } catch (error) {
     console.error(error);
@@ -1688,78 +1696,130 @@ app.delete('/api/admin/motor-brands/:id', requireAdmin, async (req, res) => {
 
 // Reorder Categories
 app.put('/api/categories/reorder', requireAdmin, async (req, res) => {
-  const { categoryIds } = req.body; // Array of IDs in the desired order
-  if (!Array.isArray(categoryIds)) {
-    return res.status(400).json({ message: '올바르지 않은 품목군 목록 형식입니다.' });
+  const { categoryIds, items } = req.body;
+  const reorderItems = Array.isArray(items)
+    ? flattenCategoryReorderItems(items)
+    : Array.isArray(categoryIds)
+      ? categoryIds.map((id, index) => ({
+          id: String(id),
+          parent_id: null,
+          sort_order: index + 1
+        }))
+      : null;
+
+  if (!Array.isArray(reorderItems)) {
+    return res.status(400).json({ message: '??? ???? ?? ?????.' });
   }
 
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
-    for (let i = 0; i < categoryIds.length; i++) {
-      await connection.query('UPDATE categories SET sort_order = ? WHERE id = ?', [i + 1, categoryIds[i]]);
+    for (const item of reorderItems) {
+      await connection.query(
+        'UPDATE categories SET parent_id = ?, sort_order = ? WHERE id = ?',
+        [normalizeCategoryParentId(item.parent_id), item.sort_order, item.id]
+      );
     }
     await connection.commit();
-    res.json({ success: true, message: '품목군 순서가 업데이트되었습니다.' });
+    res.json({ success: true, message: '???? ??? ?????????.' });
   } catch (error) {
     await connection.rollback();
     console.error(error);
-    res.status(500).json({ message: '서버 내부 오류로 순서 저장에 실패했습니다.' });
+    res.status(500).json({ message: '?? ??? ???? ?? ??? ??????.' });
   } finally {
     connection.release();
   }
 });
 
 app.post('/api/categories', requireAdmin, async (req, res) => {
-  const { id, name } = req.body;
+  const { id, name, parent_id, parentId } = req.body;
   if (!id || !name) {
-    return res.status(400).json({ message: '품목군 ID와 이름을 입력해주세요.' });
+    return res.status(400).json({ message: '???? ID? ??? ?? ??? ???.' });
   }
   try {
     const [existing] = await pool.query('SELECT * FROM categories WHERE id = ?', [id]);
     if (existing.length > 0) {
-      return res.status(400).json({ message: '이미 존재하는 품목군 ID입니다.' });
+      return res.status(400).json({ message: '?? ???? ???? ID???.' });
     }
-    // Set default sort_order as max + 1
-    const [maxOrderRows] = await pool.query('SELECT MAX(sort_order) as max_val FROM categories');
+
+    const normalizedParentId = normalizeCategoryParentId(parent_id ?? parentId);
+    if (normalizedParentId) {
+      const [parentRows] = await pool.query('SELECT id FROM categories WHERE id = ?', [normalizedParentId]);
+      if (parentRows.length === 0) {
+        return res.status(400).json({ message: '??? ?? ????? ?? ? ????.' });
+      }
+    }
+
+    const [maxOrderRows] = await pool.query(
+      'SELECT MAX(sort_order) as max_val FROM categories WHERE COALESCE(parent_id, "") = COALESCE(?, "")',
+      [normalizedParentId]
+    );
     const nextOrder = (maxOrderRows[0].max_val || 0) + 1;
 
-    await pool.query('INSERT INTO categories (id, name, sort_order) VALUES (?, ?, ?)', [id, name, nextOrder]);
-    res.status(201).json({ success: true, message: '품목군이 추가되었습니다.' });
+    await pool.query(
+      'INSERT INTO categories (id, name, parent_id, sort_order) VALUES (?, ?, ?, ?)',
+      [id, name, normalizedParentId, nextOrder]
+    );
+    res.status(201).json({ success: true, message: '????? ???????.' });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ message: '서버 내부 오류' });
+    res.status(500).json({ message: '?? ??? ??????.' });
   }
 });
 
 app.delete('/api/categories/:id', requireAdmin, async (req, res) => {
   try {
+    const [childCats] = await pool.query('SELECT COUNT(*) as count FROM categories WHERE COALESCE(parent_id, "") = ?', [req.params.id]);
+    if (childCats[0].count > 0) {
+      return res.status(400).json({
+        message: '?? ????? ?? ????? ??? ? ????.'
+      });
+    }
+
     const [prods] = await pool.query('SELECT COUNT(*) as count FROM products WHERE category = ? AND is_deleted = FALSE', [req.params.id]);
     if (prods[0].count > 0) {
-      return res.status(400).json({ 
-        message: '해당 품목군에 등록된 상품이 존재하여 삭제할 수 없습니다. 상품들의 카테고리를 먼저 변경하거나 삭제해주세요.' 
+      return res.status(400).json({
+        message: '?? ????? ??? ??? ?? ??? ? ????. ??? ????? ?? ????? ??? ???.'
       });
     }
     await pool.query('DELETE FROM categories WHERE id = ?', [req.params.id]);
-    res.json({ success: true, message: '품목군이 삭제되었습니다.' });
+    res.json({ success: true, message: '????? ???????.' });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ message: '서버 내부 오류' });
+    res.status(500).json({ message: '?? ??? ??????.' });
   }
 });
 
 app.put('/api/categories/:id', requireAdmin, async (req, res) => {
-  const { name } = req.body;
+  const { name, parent_id, parentId } = req.body;
   const { id } = req.params;
   if (!name) {
-    return res.status(400).json({ message: '품목군 이름을 입력해주세요.' });
+    return res.status(400).json({ message: '???? ??? ??? ???.' });
   }
   try {
-    await pool.query('UPDATE categories SET name = ? WHERE id = ?', [name, id]);
-    res.json({ success: true, message: '품목군 이름이 수정되었습니다.' });
+    const normalizedParentId = normalizeCategoryParentId(parent_id ?? parentId);
+    if (normalizedParentId === id) {
+      return res.status(400).json({ message: '?? ????? ?? ??? ? ? ????.' });
+    }
+
+    if (normalizedParentId) {
+      const [allCategories] = await pool.query('SELECT id, parent_id FROM categories');
+      const descendantIds = getCategoryDescendantIds(allCategories, id);
+      if (descendantIds.has(normalizedParentId)) {
+        return res.status(400).json({ message: '?? ????? ??? ??? ? ????.' });
+      }
+
+      const [parentRows] = await pool.query('SELECT id FROM categories WHERE id = ?', [normalizedParentId]);
+      if (parentRows.length === 0) {
+        return res.status(400).json({ message: '??? ?? ????? ?? ? ????.' });
+      }
+    }
+
+    await pool.query('UPDATE categories SET name = ?, parent_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [name, normalizedParentId, id]);
+    res.json({ success: true, message: '????? ???????.' });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ message: '서버 내부 오류' });
+    res.status(500).json({ message: '?? ??? ??????.' });
   }
 });
 
@@ -1867,6 +1927,70 @@ async function validateProductPrice(price, category, id = null) {
 function normalizeBrand(value) {
   const brand = String(value || '').trim();
   return brand || 'Other';
+}
+
+function normalizeCategoryParentId(value) {
+  const parentId = String(value ?? '').trim();
+  return parentId || null;
+}
+
+function getCategoryDescendantIds(categories, rootId) {
+  const normalizedRootId = String(rootId || '').trim();
+  if (!normalizedRootId) return new Set();
+
+  const childrenMap = new Map();
+  for (const category of categories || []) {
+    const parentKey = normalizeCategoryParentId(category.parent_id);
+    if (!childrenMap.has(parentKey)) {
+      childrenMap.set(parentKey, []);
+    }
+    childrenMap.get(parentKey).push(String(category.id));
+  }
+
+  const descendants = new Set();
+  const stack = [...(childrenMap.get(normalizedRootId) || [])];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (!current || descendants.has(current)) continue;
+    descendants.add(current);
+    const children = childrenMap.get(current) || [];
+    for (const childId of children) {
+      if (!descendants.has(childId)) {
+        stack.push(childId);
+      }
+    }
+  }
+  return descendants;
+}
+
+function flattenCategoryReorderItems(items, parentId = null, output = []) {
+  if (!Array.isArray(items)) return output;
+  items.forEach((item, index) => {
+    if (!item) return;
+    if (typeof item === 'string') {
+      output.push({
+        id: String(item),
+        parent_id: normalizeCategoryParentId(parentId),
+        sort_order: index + 1
+      });
+      return;
+    }
+
+    const id = String(item.id ?? item.categoryId ?? '').trim();
+    if (!id) return;
+
+    const nextParentId = normalizeCategoryParentId(item.parent_id ?? item.parentId ?? parentId);
+    output.push({
+      id,
+      parent_id: nextParentId,
+      sort_order: Number(item.sort_order ?? index + 1) || index + 1
+    });
+
+    if (Array.isArray(item.children) && item.children.length > 0) {
+      flattenCategoryReorderItems(item.children, id, output);
+    }
+  });
+  return output;
 }
 
 function parseBooleanFlag(value, fallback = true) {

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useShop } from '../context/ShopContext';
 import { 
   TrendingUp, Users, ShoppingBag, Truck, Plus, Edit2, Trash2, 
-  CheckCircle, AlertTriangle, ChevronRight, X, UserCheck, RefreshCw, Cpu, Upload, Lock, ShieldCheck 
+  CheckCircle, AlertTriangle, ChevronRight, X, UserCheck, RefreshCw, Cpu, Upload, Lock, ShieldCheck, GripVertical 
 } from 'lucide-react';
 import './AdminDashboard.css';
 
@@ -12,7 +12,6 @@ export default function AdminDashboard() {
 
     createProduct, updateProduct, updateProductActive, deleteProduct, products, fetchProducts,
     categories, createCategory, updateCategory, deleteCategory, reorderCategories, reorderProducts,
-    motorBrands, createMotorBrand, deleteMotorBrand, fetchMotorBrands,
     backendUrl
   } = useShop();
 
@@ -52,10 +51,9 @@ export default function AdminDashboard() {
     setProdPage(1);
   }, [prodFilter, prodSortField, prodSortDirection]);
 
-  // Category Selector / Creation Modal States
-  const [showCategorySelector, setShowCategorySelector] = useState(false);
   const [newCatId, setNewCatId] = useState('');
   const [newCatName, setNewCatName] = useState('');
+  const [newCatParentId, setNewCatParentId] = useState('');
   const [catError, setCatError] = useState('');
   const [catSuccess, setCatSuccess] = useState('');
 
@@ -75,14 +73,98 @@ export default function AdminDashboard() {
   const [trackingInputs, setTrackingInputs] = useState({});
   const [editingCatId, setEditingCatId] = useState(null);
   const [editingCatName, setEditingCatName] = useState('');
+  const [editingCatParentId, setEditingCatParentId] = useState('');
   const [localCategories, setLocalCategories] = useState([]);
-  const [newMotorBrandName, setNewMotorBrandName] = useState('');
-  const [motorBrandMessage, setMotorBrandMessage] = useState('');
-  const [showMotorBrandManager, setShowMotorBrandManager] = useState(true);
 
   useEffect(() => {
     setLocalCategories(categories);
   }, [categories]);
+
+  const normalizeCategoryParentId = (value) => {
+    const text = String(value ?? '').trim();
+    return text || null;
+  };
+
+  const buildCategoryTree = (items = []) => {
+    const childrenMap = new Map();
+    const lookup = new Map();
+
+    (items || []).forEach((item) => {
+      const node = { ...item, parent_id: normalizeCategoryParentId(item.parent_id) };
+      lookup.set(node.id, node);
+      const parentKey = normalizeCategoryParentId(node.parent_id);
+      if (!childrenMap.has(parentKey)) {
+        childrenMap.set(parentKey, []);
+      }
+      childrenMap.get(parentKey).push(node);
+    });
+
+    const sortNodes = (nodes = []) => [...nodes].sort((a, b) => {
+      const aOrder = Number(a.sort_order || 0);
+      const bOrder = Number(b.sort_order || 0);
+      if (aOrder !== bOrder) return aOrder - bOrder;
+      return String(a.name || '').localeCompare(String(b.name || ''), 'ko');
+    });
+
+    const buildNode = (node) => ({
+      ...node,
+      children: sortNodes(childrenMap.get(node.id) || []).map(buildNode)
+    });
+
+    return {
+      lookup,
+      tree: sortNodes(childrenMap.get(null) || []).map(buildNode)
+    };
+  };
+
+  const flattenCategoryTree = (items = [], parentId = null, output = []) => {
+    items.forEach((item, index) => {
+      output.push({
+        id: item.id,
+        parent_id: normalizeCategoryParentId(parentId),
+        sort_order: index + 1
+      });
+      if (Array.isArray(item.children) && item.children.length > 0) {
+        flattenCategoryTree(item.children, item.id, output);
+      }
+    });
+    return output;
+  };
+
+  const reorderSiblingTree = (treeItems, parentId, fromIndex, toIndex) => {
+    const cloneGroup = (group) => group.map((item) => ({
+      ...item,
+      children: Array.isArray(item.children) ? cloneGroup(item.children) : []
+    }));
+
+    const clone = cloneGroup(treeItems);
+
+    const reorderInGroup = (nodes, targetParentId) => {
+      const normalizedTargetParentId = normalizeCategoryParentId(targetParentId);
+      if (normalizeCategoryParentId(parentId) !== normalizedTargetParentId) {
+        return false;
+      }
+      if (!Array.isArray(nodes) || fromIndex < 0 || toIndex < 0 || fromIndex >= nodes.length || toIndex >= nodes.length) {
+        return false;
+      }
+      const next = [...nodes];
+      const [moved] = next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, moved);
+      nodes.splice(0, nodes.length, ...next);
+      return true;
+    };
+
+    const walk = (nodes, targetParentId = null) => {
+      if (reorderInGroup(nodes, targetParentId)) return true;
+      for (const node of nodes) {
+        if (walk(node.children || [], node.id)) return true;
+      }
+      return false;
+    };
+
+    walk(clone, null);
+    return clone;
+  };
 
   const maskName = (value = '') => {
     const text = String(value || '').trim();
@@ -208,31 +290,83 @@ export default function AdminDashboard() {
   };
 
   // Drag and Drop state for categories
-  const [draggedCatIndex, setDraggedCatIndex] = useState(null);
+  const [draggedCategoryId, setDraggedCategoryId] = useState(null);
 
-  const handleCatDragStart = (index) => {
-    setDraggedCatIndex(index);
+  const handleCategoryDragStart = (categoryId) => {
+    setDraggedCategoryId(categoryId);
   };
 
-  const handleCatDragOver = (e, index) => {
-    e.preventDefault();
-    if (draggedCatIndex === null || draggedCatIndex === index) return;
-
-    const reordered = [...localCategories];
-    const target = reordered[draggedCatIndex];
-    reordered.splice(draggedCatIndex, 1);
-    reordered.splice(index, 0, target);
-    
-    setLocalCategories(reordered);
-    setDraggedCatIndex(index);
+  const getCategoryDescendantIds = (items = [], rootId) => {
+    return (items || []).reduce((acc, item) => {
+      if (String(item.parent_id ?? '').trim() === String(rootId)) {
+        acc.push(item.id, ...getCategoryDescendantIds(items, item.id));
+      }
+      return acc;
+    }, []);
   };
 
-  const handleCatDragEnd = async () => {
-    if (draggedCatIndex === null) return;
-    const categoryIds = localCategories.map(c => c.id);
-    await reorderCategories(categoryIds);
-    setDraggedCatIndex(null);
+  const moveCategoryBeforeTarget = (nodes = [], sourceId, targetId) => {
+    const cloneNodes = (list = []) => list.map((node) => ({
+      ...node,
+      children: cloneNodes(node.children || [])
+    }));
+
+    const reorderGroup = (list = []) => {
+      const sourceIndex = list.findIndex((node) => node.id === sourceId);
+      const targetIndex = list.findIndex((node) => node.id === targetId);
+      if (sourceIndex >= 0 && targetIndex >= 0) {
+        const next = [...list];
+        const [moved] = next.splice(sourceIndex, 1);
+        const insertIndex = sourceIndex < targetIndex ? targetIndex - 1 : targetIndex;
+        next.splice(insertIndex, 0, moved);
+        return next;
+      }
+
+      return list.map((node) => ({
+        ...node,
+        children: reorderGroup(node.children || [])
+      }));
+    };
+
+    return reorderGroup(cloneNodes(nodes));
   };
+
+  const handleCategoryDrop = async (targetId) => {
+    if (!draggedCategoryId || draggedCategoryId === targetId) {
+      setDraggedCategoryId(null);
+      return;
+    }
+
+    const source = localCategories.find((cat) => cat.id === draggedCategoryId);
+    const target = localCategories.find((cat) => cat.id === targetId);
+    if (!source || !target || normalizeCategoryParentId(source.parent_id) !== normalizeCategoryParentId(target.parent_id)) {
+      setDraggedCategoryId(null);
+      return;
+    }
+
+    const reorderedTree = moveCategoryBeforeTarget(categoryTree, draggedCategoryId, targetId);
+    const payload = { items: flattenCategoryTree(reorderedTree) };
+    const res = await reorderCategories(payload);
+    if (res?.success !== false) {
+      const flat = flattenCategoryTree(reorderedTree);
+      const byId = new Map(localCategories.map((cat) => [cat.id, cat]));
+      setLocalCategories(flat.map((item) => ({
+        ...byId.get(item.id),
+        parent_id: normalizeCategoryParentId(item.parent_id),
+        sort_order: item.sort_order
+      })));
+    }
+
+    setDraggedCategoryId(null);
+  };
+
+  const handleCategoryDragEnd = () => {
+    setDraggedCategoryId(null);
+  };
+
+  const categoryTreeData = buildCategoryTree(localCategories);
+  const categoryTree = categoryTreeData.tree;
+  const categoryLookup = categoryTreeData.lookup;
 
   // Product Reorder actions
   const handleProductMoveUp = async (product, index, allProductsInCategory) => {
@@ -478,7 +612,6 @@ export default function AdminDashboard() {
     try {
       const statsData = await fetchAdminStats();
       setStats(statsData);
-      await fetchMotorBrands();
       const ordersData = await fetchAllOrders();
       setOrders(ordersData);
       
@@ -577,36 +710,6 @@ export default function AdminDashboard() {
     setFormError('');
     setPriceConfirmed(false);
     setShowProductModal(true);
-  };
-
-  const handleAddMotorBrand = async (e) => {
-    e.preventDefault();
-    const name = newMotorBrandName.trim();
-    if (!name) {
-      setMotorBrandMessage('브랜드명을 입력해 주세요.');
-      return;
-    }
-
-    const res = await createMotorBrand(name);
-    if (res.success) {
-      setNewMotorBrandName('');
-      setMotorBrandMessage('모터 브랜드가 추가되었습니다.');
-      await fetchMotorBrands();
-    } else {
-      setMotorBrandMessage(res.message || '브랜드 추가에 실패했습니다.');
-    }
-  };
-
-  const handleRemoveMotorBrand = async (brandId, brandName) => {
-    if (!window.confirm(`'${brandName}' 브랜드를 숨김 처리할까요?`)) return;
-
-    const res = await deleteMotorBrand(brandId);
-    if (res.success) {
-      setMotorBrandMessage('브랜드가 숨김 처리되었습니다.');
-      await fetchMotorBrands();
-    } else {
-      setMotorBrandMessage(res.message || '브랜드 삭제에 실패했습니다.');
-    }
   };
 
   const openEditModal = (p) => {
@@ -1092,74 +1195,6 @@ export default function AdminDashboard() {
 
 
 
-                    <div className="card p-4 flex flex-col gap-3 bg-white rounded-xl border">
-                      <div className="flex items-center justify-between gap-3 flex-wrap">
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <h4 className="text-sm font-extrabold text-dark">모터 브랜드 관리</h4>
-                            <button
-                              type="button"
-                              onClick={() => setShowMotorBrandManager(prev => !prev)}
-                              className="rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-2xs font-bold text-slate-500 hover:bg-slate-100"
-                            >
-                              {showMotorBrandManager ? '접기' : '펼치기'}
-                            </button>
-                          </div>
-                          <p className="text-3xs text-light mt-1">모터 카테고리에 노출할 브랜드만 추가하거나 숨길 수 있습니다.</p>
-                        </div>
-                        {showMotorBrandManager && (
-                          <form onSubmit={handleAddMotorBrand} className="flex items-center gap-2 flex-wrap">
-                            <input
-                              type="text"
-                              value={newMotorBrandName}
-                              onChange={(e) => setNewMotorBrandName(e.target.value)}
-                              placeholder="브랜드명"
-                              className="form-input text-xs py-2 px-3 border rounded-lg bg-white"
-                              style={{ minWidth: '180px' }}
-                            />
-                            <button type="submit" className="btn btn-primary py-2 px-3 text-xs font-bold flex items-center gap-1">
-                              <Plus size={14} /> 추가
-                            </button>
-                          </form>
-                        )}
-                      </div>
-
-                      {showMotorBrandManager && (
-                        <>
-                          {motorBrandMessage && (
-                            <div className="text-xs text-slate-500">{motorBrandMessage}</div>
-                          )}
-
-                          <div className="flex flex-wrap gap-2">
-                            {(motorBrands || []).map((brand) => {
-                              const brandId = brand.id || brand.name || brand;
-                              const brandName = brand.name || brand;
-                              return (
-                                <span
-                                  key={brandId}
-                                  className="inline-flex items-center gap-1 rounded-full bg-violet-50 text-violet-700 border border-violet-100 px-3 py-1 text-xs font-bold"
-                                >
-                                  {brandName}
-                                  <button
-                                    type="button"
-                                    onClick={() => handleRemoveMotorBrand(brandId, brandName)}
-                                    className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-white/70 text-violet-500 hover:bg-violet-100"
-                                    aria-label={`${brandName} 숨기기`}
-                                    title="숨기기"
-                                  >
-                                    ×
-                                  </button>
-                                </span>
-                              );
-                            })}
-                            {(!motorBrands || motorBrands.length === 0) && (
-                              <div className="text-xs text-light">등록된 모터 브랜드가 없습니다.</div>
-                            )}
-                          </div>
-                        </>
-                      )}
-                    </div>
-                    {/* 필터 및 신규 등록 영역 */}
                     <div className="flex justify-between items-center gap-4 flex-wrap bg-white p-4 rounded-xl border">
                       <div className="flex items-center gap-4 flex-wrap">
                         <div className="flex items-center gap-2">
@@ -1232,7 +1267,7 @@ export default function AdminDashboard() {
                       <label htmlFor="product-csv-upload" className="btn btn-secondary py-2 px-3 text-xs flex items-center gap-1 cursor-pointer">
                         <Upload size={14} /> CSV 일괄 등록
                       </label>
-                      <button onClick={() => setShowCategorySelector(true)} className="btn btn-primary py-2 px-3 text-xs flex items-center gap-1">
+                      <button onClick={() => openAddModal(prodFilter !== 'all' ? prodFilter : (categories?.[0]?.id || 'motor'))} className="btn btn-primary py-2 px-3 text-xs flex items-center gap-1">
                         <Plus size={14} /> 신규 상품 등록
                       </button>
                     </div>
@@ -1269,7 +1304,7 @@ export default function AdminDashboard() {
                     </div>
 
                     <div className="table-responsive card p-4">
-                      <table className="admin-table w-full text-left border-collapse">
+                      <table className="admin-table admin-product-table w-full text-left border-collapse">
                         <thead>
                           <tr className="border-b text-xs text-light font-bold">
                             <th className="py-3 px-2 w-8">
@@ -1280,19 +1315,29 @@ export default function AdminDashboard() {
                                 className="cursor-pointer"
                               />
                             </th>
-                            <th className="py-3 px-2">카테고리</th>
-                            <th className="py-3 px-2">상품명</th>
-                            <th className="py-3 px-2">가격</th>
-                            <th className="py-3 px-2">재고수량</th>
-                            <th className="py-3 px-2">등록일시</th>
-                            <th className="py-3 px-2 text-center">관리</th>
+                            <th className="py-3 px-2 text-center">??</th>
+                            <th className="py-3 px-2 text-center">??</th>
+                            <th className="py-3 px-2">???</th>
+                            <th className="py-3 px-2 text-center">????</th>
+                            <th className="py-3 px-2 text-right">???</th>
+                            <th className="py-3 px-2 text-right">????</th>
+                            <th className="py-3 px-2">??????</th>
+                            <th className="py-3 px-2">?????</th>
                           </tr>
                         </thead>
                         <tbody>
                           {paginatedProducts.length > 0 ? (
                             paginatedProducts.map(p => {
-                              const catObj = categories.find(c => c.id === p.category);
-                              const categoryName = catObj ? catObj.name : p.category;
+                              const statusLabel = (p.is_active === false || p.is_active === 0)
+                                ? '????'
+                                : Number(p.stock || 0) <= 0
+                                  ? '??'
+                                  : '???';
+                              const statusClass = statusLabel === '???'
+                                ? 'status-on'
+                                : statusLabel === '??'
+                                  ? 'status-soldout'
+                                  : 'status-stop';
                               return (
                                 <tr key={p.id} className="border-b text-sm text-dark hover:bg-slate-50">
                                   <td className="py-3 px-2">
@@ -1303,52 +1348,41 @@ export default function AdminDashboard() {
                                       className="cursor-pointer w-4 h-4"
                                     />
                                   </td>
-                                  <td className="py-3 px-2"><span className="badge badge-purple text-xs px-2 py-0.5">{categoryName}</span></td>
-                                  <td className="py-3 px-2 font-bold text-base">{p.name}</td>
-                                  <td className="py-3 px-2 text-xs font-bold text-slate-600">{p.brand || '-'}</td>
-                                  <td className="py-3 px-2 font-bold text-base">{p.price.toLocaleString()}원</td>
-                                  <td className="py-3 px-2 text-base">
-                                    {p.stock === 0 ? (
-                                      <span className="badge badge-red text-xs px-2 py-0.5 font-extrabold">품절</span>
-                                    ) : (
-                                      <span className="font-semibold">{p.stock}개</span>
-                                    )}
-                                  </td>
-                                  <td className="py-3 px-2">
-                                    <button
-                                      type="button"
-                                      onClick={async () => {
-                                        const nextActive = !(p.is_active !== false && p.is_active !== 0);
-                                        const res = await updateProductActive(p.id, nextActive);
-                                        if (!res.success) alert(res.message || '노출 상태 변경 실패');
-                                      }}
-                                      className={`btn py-1 px-3 text-2xs font-bold ${(p.is_active !== false && p.is_active !== 0) ? 'btn-secondary text-green-700 bg-green-50 border-green-200' : 'btn-secondary text-slate-500 bg-slate-100 border-slate-200'}`}
+                                  <td className="py-3 px-2 text-center">
+                                    <button 
+                                      onClick={() => openEditModal(p)} 
+                                      className="btn btn-secondary py-1 px-3 text-2xs font-bold"
                                     >
-                                      {(p.is_active !== false && p.is_active !== 0) ? '노출중' : '숨김'}
+                                      ??
                                     </button>
                                   </td>
-                                  <td className="py-3 px-2 text-xs text-light">{p.created_at ? formatOrderDateTime(p.created_at) : '-'}</td>
-                                  <td className="py-3 px-2 text-center flex justify-center items-center gap-2">
+                                  <td className="py-3 px-2 text-center">
                                     <button 
                                       onClick={() => handleCopyProduct(p)} 
-                                      className="btn-icon text-amber-600 hover:bg-amber-50 px-2 py-1 rounded border border-amber-200 text-xs font-bold"
-                                      title="이 상품 복사하여 새로 등록"
+                                      className="btn btn-secondary py-1 px-3 text-2xs font-bold"
                                     >
-                                      복사
-                                    </button>
-                                    <button onClick={() => openEditModal(p)} className="btn-icon text-primary hover:bg-purple-50 p-1.5 rounded border border-slate-200">
-                                      <Edit2 size={16} />
-                                    </button>
-                                    <button onClick={() => handleDeleteProduct(p.id)} className="btn-icon text-red-600 hover:bg-red-50 p-1.5 rounded border border-slate-200">
-                                      <Trash2 size={16} />
+                                      ??
                                     </button>
                                   </td>
+                                  <td className="py-3 px-2">
+                                    <div className="flex flex-col gap-1">
+                                      <span className="font-bold text-base text-dark">{p.name}</span>
+                                      <span className="text-xs text-slate-500">{(categories.find(c => c.id === p.category) || {}).name || p.category}</span>
+                                    </div>
+                                  </td>
+                                  <td className="py-3 px-2 text-center">
+                                    <span className={`product-status-chip ${statusClass}`}>{statusLabel}</span>
+                                  </td>
+                                  <td className="py-3 px-2 text-right font-bold text-base">{Number(p.price || 0).toLocaleString()}?</td>
+                                  <td className="py-3 px-2 text-right font-bold text-base">{Number(p.stock || 0).toLocaleString()}?</td>
+                                  <td className="py-3 px-2 text-sm text-light">{p.created_at ? formatOrderDateTime(p.created_at) : '-'}</td>
+                                  <td className="py-3 px-2 text-sm text-light">{p.updated_at ? formatOrderDateTime(p.updated_at) : '-'}</td>
                                 </tr>
                               );
                             })
                           ) : (
                             <tr>
-                              <td colSpan="7" className="text-center py-6 text-sm text-light">해당 분류의 등록된 상품이 없습니다.</td>
+                              <td colSpan="9" className="text-center py-6 text-sm text-light">?? ??? ??? ??? ????.</td>
                             </tr>
                           )}
                         </tbody>
@@ -1762,15 +1796,18 @@ export default function AdminDashboard() {
               {/* Tab 5: Categories */}
               {activeTab === 'categories' && (
                 <div className="tab-categories flex flex-col gap-6">
-                  <div className="flex justify-between items-center">
-                    <h3 className="font-extrabold text-dark text-sm">품목군(카테고리) 목록 ({categories.length}종)</h3>
+                  <div className="flex items-end justify-between gap-4 flex-wrap">
+                    <div>
+                      <h3 className="font-extrabold text-dark text-lg">???? ??</h3>
+                      <p className="text-xs text-light mt-1">?? ???? ??? ?? ? ??, ?? ?? ???? ??? ? ???? ??? ?? ? ????.</p>
+                    </div>
+                    <div className="text-xs text-light font-medium">? {categories.length}?</div>
                   </div>
 
-                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                    {/* Add Category Form */}
+                  <div className="grid grid-cols-1 lg:grid-cols-[320px_minmax(0,1fr)] gap-6">
                     <div className="card p-5 h-fit">
-                      <h4 className="font-bold text-dark text-sm mb-4">신규 품목군 등록</h4>
-                      
+                      <h4 className="font-bold text-dark text-sm mb-4">???? ??</h4>
+
                       {catError && (
                         <div className="alert-box alert-danger mb-3 text-xs font-semibold flex items-center gap-1">
                           <AlertTriangle size={12} /> {catError}
@@ -1783,140 +1820,217 @@ export default function AdminDashboard() {
                       )}
 
                       <div className="form-group mb-3">
-                        <label className="form-label text-xs font-bold mb-1">품목군 고유 코드 ID *</label>
-                        <input 
-                          type="text" 
+                        <label className="form-label text-xs font-bold mb-1">???? ?? ID *</label>
+                        <input
+                          type="text"
                           className="form-input text-xs"
                           value={newCatId}
                           onChange={(e) => setNewCatId(e.target.value)}
-                          placeholder="영문 소문자 (예: sensor)"
+                          placeholder="?: motor-servo"
                         />
                       </div>
-                      <div className="form-group mb-4">
-                        <label className="form-label text-xs font-bold mb-1">품목군 한글 노출명 *</label>
-                        <input 
-                          type="text" 
+
+                      <div className="form-group mb-3">
+                        <label className="form-label text-xs font-bold mb-1">???? ?? *</label>
+                        <input
+                          type="text"
                           className="form-input text-xs"
                           value={newCatName}
                           onChange={(e) => setNewCatName(e.target.value)}
-                          placeholder="한글 (예: 센서)"
+                          placeholder="?: ????"
                         />
                       </div>
-                      <button 
+
+                      <div className="form-group mb-4">
+                        <label className="form-label text-xs font-bold mb-1">?? ????</label>
+                        <select
+                          className="form-select text-xs"
+                          value={newCatParentId}
+                          onChange={(e) => setNewCatParentId(e.target.value)}
+                        >
+                          <option value="">??? ????</option>
+                          {localCategories.map((cat) => (
+                            <option key={cat.id} value={cat.id}>
+                              {(categoryLookup.get(cat.id)?.name || cat.name)}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <button
                         onClick={async () => {
                           setCatError('');
                           setCatSuccess('');
-                          if(!newCatId || !newCatName) {
-                            setCatError('코드 ID와 이름을 모두 입력해주세요.');
+                          if (!newCatId.trim() || !newCatName.trim()) {
+                            setCatError('?? ID? ??? ?? ??? ???.');
                             return;
                           }
-                          const res = await createCategory(newCatId, newCatName);
-                          if(res.success) {
-                            setCatSuccess('품목군이 추가되었습니다.');
+                          const res = await createCategory(newCatId.trim(), newCatName.trim(), newCatParentId || null);
+                          if (res.success) {
+                            setCatSuccess('????? ???????.');
                             setNewCatId('');
                             setNewCatName('');
+                            setNewCatParentId('');
                           } else {
-                            setCatError(res.message || '추가 실패');
+                            setCatError(res.message || '?? ??');
                           }
                         }}
                         className="btn btn-primary w-full py-2 text-xs font-bold"
                       >
-                        품목군 추가하기
+                        ???? ??
                       </button>
                     </div>
 
-                    {/* Category List */}
-                    <div className="lg:col-span-2 table-responsive card p-4">
-                      <table className="admin-table w-full text-left border-collapse">
-                        <thead>
-                          <tr className="border-b text-xs text-light font-bold">
-                            <th className="py-3 px-2">품목군 코드 (ID)</th>
-                            <th className="py-3 px-2">노출 이름</th>
-                            <th className="py-3 px-2 text-center">삭제</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {localCategories.map((cat, index) => (
-                            <tr 
-                              key={cat.id} 
-                              className="border-b text-xs text-dark hover:bg-slate-50 draggable-row"
-                              draggable={true}
-                              onDragStart={() => handleCatDragStart(index)}
-                              onDragOver={(e) => handleCatDragOver(e, index)}
-                              onDragEnd={handleCatDragEnd}
-                            >
-                              <td className="py-3 px-2 font-mono font-bold text-light">{cat.id}</td>
-                              <td className="py-3 px-2">
-                                {editingCatId === cat.id ? (
-                                  <div className="flex items-center gap-2">
-                                    <input
-                                      type="text"
-                                      value={editingCatName}
-                                      onChange={(e) => setEditingCatName(e.target.value)}
-                                      className="form-input text-xs py-1 px-2 border rounded-lg bg-white"
-                                      style={{ width: '150px', height: '30px' }}
-                                    />
+                    <div className="card p-5">
+                      <div className="flex items-center justify-between gap-3 mb-4">
+                        <div>
+                          <h4 className="font-bold text-dark text-sm">???? ??</h4>
+                          <p className="text-xs text-light mt-1">?? ?? ????? ??? ???? ?? ? ????.</p>
+                        </div>
+                        <span className="text-2xs text-light font-bold">??? ? ?? ??</span>
+                      </div>
+
+                      <div className="admin-category-tree">
+                        {categoryTree.map((node) => {
+                          const renderNode = (item, depth = 0) => {
+                            const children = Array.isArray(item.children) ? item.children : [];
+                            const parentLabel = item.parent_id ? (categoryLookup.get(item.parent_id)?.name || item.parent_id) : '???';
+                            const blockedParents = new Set([item.id, ...getCategoryDescendantIds(localCategories, item.id)]);
+                            const isEditing = editingCatId === item.id;
+
+                            return (
+                              <div key={item.id} className={`admin-category-node ${draggedCategoryId === item.id ? 'dragging' : ''}`}>
+                                <div
+                                  className="admin-category-node-row"
+                                  draggable
+                                  onDragStart={() => handleCategoryDragStart(item.id)}
+                                  onDragOver={(e) => e.preventDefault()}
+                                  onDrop={() => handleCategoryDrop(item.id)}
+                                  onDragEnd={handleCategoryDragEnd}
+                                  style={{ paddingLeft: `${depth * 18}px` }}
+                                >
+                                  <button type="button" className="admin-category-drag-handle" aria-label="????? ?? ??">
+                                    <GripVertical size={14} />
+                                  </button>
+                                  <div className="admin-category-node-main">
+                                    <div className="admin-category-node-title">{item.name}</div>
+                                    <div className="admin-category-node-meta">
+                                      <span>{item.id}</span>
+                                      <span>??: {parentLabel}</span>
+                                      <span>?? {children.length}?</span>
+                                    </div>
+                                  </div>
+                                  <div className="admin-category-node-actions">
                                     <button
-                                      onClick={async () => {
-                                        if (!editingCatName.trim()) {
-                                          alert('품목군 이름을 입력해주세요.');
-                                          return;
-                                        }
-                                        const res = await updateCategory(cat.id, editingCatName.trim());
-                                        if (res.success) {
-                                          setEditingCatId(null);
-                                        } else {
-                                          alert(res.message || '수정 실패');
-                                        }
+                                      type="button"
+                                      onClick={() => {
+                                        setEditingCatId(item.id);
+                                        setEditingCatName(item.name);
+                                        setEditingCatParentId(item.parent_id || '');
                                       }}
-                                      className="btn btn-primary text-2xs py-1 px-2.5 font-bold"
+                                      className="admin-mini-action"
                                     >
-                                      저장
+                                      ??
                                     </button>
                                     <button
-                                      onClick={() => setEditingCatId(null)}
-                                      className="btn btn-secondary text-2xs py-1 px-2.5 font-bold"
+                                      type="button"
+                                      onClick={async () => {
+                                        if (window.confirm(`??? '${item.name}' ????? ?????????`)) {
+                                          const res = await deleteCategory(item.id);
+                                          if (res.success) {
+                                            alert('????? ???????.');
+                                          } else {
+                                            alert(res.message);
+                                          }
+                                        }
+                                      }}
+                                      className="admin-mini-action danger"
                                     >
-                                      취소
+                                      ??
                                     </button>
                                   </div>
-                                ) : (
-                                  <div className="flex items-center gap-2">
-                                    <span className="font-bold text-dark text-sm">{cat.name}</span>
-                                    <button
-                                      onClick={() => {
-                                        setEditingCatId(cat.id);
-                                        setEditingCatName(cat.name);
-                                      }}
-                                      className="text-primary hover:underline text-3xs font-bold bg-purple-50 px-1.5 py-0.5"
-                                      style={{ cursor: 'pointer', border: '1px solid #c084fc', borderRadius: '4px' }}
-                                    >
-                                      수정
-                                    </button>
+                                </div>
+
+                                {isEditing && (
+                                  <div className="admin-category-edit-panel" style={{ paddingLeft: `${depth * 18 + 34}px` }}>
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+                                      <div>
+                                        <label className="form-label text-2xs font-bold mb-1">??</label>
+                                        <input
+                                          type="text"
+                                          value={editingCatName}
+                                          onChange={(e) => setEditingCatName(e.target.value)}
+                                          className="form-input text-xs"
+                                        />
+                                      </div>
+                                      <div>
+                                        <label className="form-label text-2xs font-bold mb-1">?? ????</label>
+                                        <select
+                                          value={editingCatParentId}
+                                          onChange={(e) => setEditingCatParentId(e.target.value)}
+                                          className="form-select text-xs"
+                                        >
+                                          <option value="">??? ????</option>
+                                          {localCategories.filter((cat) => !blockedParents.has(cat.id)).map((cat) => (
+                                            <option key={cat.id} value={cat.id}>{cat.name}</option>
+                                          ))}
+                                        </select>
+                                      </div>
+                                      <div className="flex items-center gap-2">
+                                        <button
+                                          type="button"
+                                          onClick={async () => {
+                                            if (!editingCatName.trim()) {
+                                              alert('???? ??? ??? ???.');
+                                              return;
+                                            }
+                                            const res = await updateCategory(item.id, editingCatName.trim(), editingCatParentId || null);
+                                            if (res.success) {
+                                              setEditingCatId(null);
+                                              setEditingCatName('');
+                                              setEditingCatParentId('');
+                                            } else {
+                                              alert(res.message || '?? ??');
+                                            }
+                                          }}
+                                          className="btn btn-primary py-2 px-3 text-xs font-bold"
+                                        >
+                                          ??
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setEditingCatId(null);
+                                            setEditingCatName('');
+                                            setEditingCatParentId('');
+                                          }}
+                                          className="btn btn-secondary py-2 px-3 text-xs font-bold"
+                                        >
+                                          ??
+                                        </button>
+                                      </div>
+                                    </div>
                                   </div>
                                 )}
-                              </td>
-                              <td className="py-3 px-2 text-center">
-                                <button 
-                                  onClick={async () => {
-                                    if(window.confirm(`정말로 '${cat.name}' 품목군을 삭제하시겠습니까?`)) {
-                                      const res = await deleteCategory(cat.id);
-                                      if(res.success) {
-                                        alert('품목군이 삭제되었습니다.');
-                                      } else {
-                                        alert(res.message);
-                                      }
-                                    }
-                                  }}
-                                  className="btn-icon text-red-600 hover:bg-red-50 p-1 rounded"
-                                >
-                                  <Trash2 size={14} />
-                                </button>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
+
+                                {children.length > 0 && (
+                                  <div className="admin-category-children">
+                                    {children.map((child) => renderNode(child, depth + 1))}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          };
+
+                          return renderNode(node, 0);
+                        })}
+
+                        {categoryTree.length === 0 && (
+                          <div className="admin-empty-state">
+                            ?? ??? ????? ????.
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -2415,37 +2529,6 @@ export default function AdminDashboard() {
                 {editingProduct ? '정보 수정하기' : '신규 상품 등록하기'}
               </button>
             </form>
-          </div>
-        </div>
-      )}
-
-      {/* Modal: Category Selector before Product Add */}
-      {showCategorySelector && (
-        <div className="modal-backdrop flex items-center justify-center p-4">
-          <div className="modal-content card p-6 max-w-md w-full relative animate-scale-up text-center">
-            <button onClick={() => setShowCategorySelector(false)} className="absolute top-4 right-4 text-light hover:text-dark">
-              <X size={18} />
-            </button>
-
-            <h3 className="font-extrabold text-dark text-base mb-2">등록 품목군(카테고리) 선택</h3>
-            <p className="text-xs text-light mb-6">등록하려는 상품의 대분류 품목군을 먼저 선택해 주세요.</p>
-
-            <div className="grid grid-cols-2 gap-3 mb-4">
-              {categories && categories.map(cat => (
-                <button
-                  key={cat.id}
-                  type="button"
-                  onClick={() => {
-                    setShowCategorySelector(false);
-                    openAddModal(cat.id);
-                  }}
-                  className="p-4 border rounded-lg hover:border-primary hover:bg-purple-50 transition-all text-xs font-bold text-dark flex flex-col items-center justify-center gap-2"
-                >
-                  <Cpu size={24} className="text-primary" />
-                  {cat.name}
-                </button>
-              ))}
-            </div>
           </div>
         </div>
       )}

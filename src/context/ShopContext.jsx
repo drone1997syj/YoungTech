@@ -679,11 +679,11 @@ export const ShopProvider = ({ children }) => {
     }
   };
 
-  const createCategory = async (id, name) => {
+  const createCategory = async (id, name, parentId = null) => {
     try {
       await apiFetch('/categories', {
         method: 'POST',
-        body: JSON.stringify({ id, name })
+        body: JSON.stringify({ id, name, parent_id: parentId })
       });
       await fetchCategories();
       return { success: true };
@@ -704,11 +704,11 @@ export const ShopProvider = ({ children }) => {
     }
   };
 
-  const updateCategory = async (id, name) => {
+  const updateCategory = async (id, name, parentId = null) => {
     try {
       await apiFetch(`/categories/${id}`, {
         method: 'PUT',
-        body: JSON.stringify({ name })
+        body: JSON.stringify({ name, parent_id: parentId })
       });
       await fetchCategories();
       return { success: true };
@@ -717,11 +717,11 @@ export const ShopProvider = ({ children }) => {
     }
   };
 
-  const reorderCategories = async (categoryIds) => {
+  const reorderCategories = async (payload) => {
     try {
       await apiFetch('/categories/reorder', {
         method: 'PUT',
-        body: JSON.stringify({ categoryIds })
+        body: JSON.stringify(Array.isArray(payload) ? { categoryIds: payload } : payload)
       });
       await fetchCategories();
       return { success: true };

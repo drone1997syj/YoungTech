@@ -147,8 +147,10 @@ export async function initDb() {
       CREATE TABLE IF NOT EXISTS categories (
         id VARCHAR(100) PRIMARY KEY,
         name VARCHAR(100) NOT NULL,
+        parent_id VARCHAR(100) DEFAULT NULL,
         sort_order INT DEFAULT 0,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
       ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
 
@@ -156,6 +158,11 @@ export async function initDb() {
     try {
       await connection.query(`ALTER TABLE categories ADD COLUMN sort_order INT DEFAULT 0`);
       console.log('Successfully checked/added sort_order column to categories.');
+    } catch (err) {}
+
+    try {
+      await connection.query(`ALTER TABLE categories ADD COLUMN parent_id VARCHAR(100) DEFAULT NULL AFTER name`);
+      console.log('Successfully checked/added parent_id column to categories.');
     } catch (err) {}
 
     const [categoryRows] = await connection.query('SELECT COUNT(*) as count FROM categories');
@@ -186,7 +193,8 @@ export async function initDb() {
         is_deleted BOOLEAN DEFAULT FALSE,
         deleted_at TIMESTAMP NULL DEFAULT NULL,
         sort_order INT DEFAULT 0,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
       )
     `);
 
@@ -205,6 +213,11 @@ export async function initDb() {
     try {
       await connection.query(`ALTER TABLE products ADD COLUMN sort_order INT DEFAULT 0`);
       console.log('Successfully checked/added sort_order column to products.');
+    } catch (err) {}
+
+    try {
+      await connection.query(`ALTER TABLE products ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at`);
+      console.log('Successfully checked/added updated_at column to products.');
     } catch (err) {}
 
     try {
@@ -469,6 +482,7 @@ export async function initDb() {
     await ensureIndex(connection, 'claims', 'idx_claims_order_id', '`order_id`');
     await ensureIndex(connection, 'claims', 'idx_claims_user_created', '`user_id`, `created_at`');
     await ensureIndex(connection, 'claims', 'idx_claims_status_created', '`status`, `created_at`');
+    await ensureIndex(connection, 'categories', 'idx_categories_parent_sort', '`parent_id`, `sort_order`, `name`');
     await ensureIndex(connection, 'products', 'idx_products_category_sort', '`category`, `sort_order`');
     await ensureIndex(connection, 'products', 'idx_products_deleted_category_sort', '`is_deleted`, `category`, `sort_order`');
     await ensureIndex(connection, 'products', 'idx_products_category_brand_active', '`category`, `brand`, `is_active`, `is_deleted`');
