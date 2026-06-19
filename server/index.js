@@ -71,6 +71,11 @@ const upload = multer({
   }
 });
 
+const csvUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 2 * 1024 * 1024 }
+});
+
 const getPublicBaseUrl = (req) => {
   const configured = process.env.PUBLIC_BASE_URL?.trim();
   if (configured) {
@@ -1685,7 +1690,25 @@ app.put('/api/categories/:id', requireAdmin, async (req, res) => {
 // ==========================================
 app.get('/api/products', async (req, res) => {
   try {
-    const [rows] = await pool.query('SELECT * FROM products WHERE is_deleted = FALSE ORDER BY sort_order ASC, created_at DESC');
+    let includeInactive = false;
+    if (req.query.includeInactive === 'true') {
+      const token = req.headers.authorization?.split(' ')[1];
+      if (token) {
+        try {
+          const decoded = jwt.verify(token, JWT_SECRET);
+          const [users] = await pool.query('SELECT role FROM users WHERE id = ?', [decoded.id]);
+          includeInactive = users[0]?.role === 'admin';
+        } catch (err) {
+          includeInactive = false;
+        }
+      }
+    }
+    let query = 'SELECT * FROM products WHERE is_deleted = FALSE';
+    if (!includeInactive) {
+      query += ' AND is_active = TRUE';
+    }
+    query += ' ORDER BY created_at DESC, sort_order ASC';
+    const [rows] = await pool.query(query);
     // Ensure specs parsing
     const parsedRows = rows.map(r => ({
       ...r,
@@ -1764,8 +1787,80 @@ async function validateProductPrice(price, category, id = null) {
   return null;
 }
 
+function normalizeBrand(value) {
+  const brand = String(value || '').trim();
+  return brand || 'Other';
+}
+
+function parseBooleanFlag(value, fallback = true) {
+  if (value === undefined || value === null || value === '') return fallback;
+  if (typeof value === 'boolean') return value;
+  const text = String(value).trim().toLowerCase();
+  if (['false', '0', 'no', 'n', 'off', 'hidden', 'inactive'].includes(text)) return false;
+  return true;
+}
+
+function parseCsv(text) {
+  const rows = [];
+  let row = [];
+  let cell = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text[i];
+    const next = text[i + 1];
+
+    if (char === '"' && inQuotes && next === '"') {
+      cell += '"';
+      i += 1;
+    } else if (char === '"') {
+      inQuotes = !inQuotes;
+    } else if (char === ',' && !inQuotes) {
+      row.push(cell.trim());
+      cell = '';
+    } else if ((char === '\n' || char === '\r') && !inQuotes) {
+      if (char === '\r' && next === '\n') i += 1;
+      row.push(cell.trim());
+      if (row.some(value => value !== '')) rows.push(row);
+      row = [];
+      cell = '';
+    } else {
+      cell += char;
+    }
+  }
+
+  row.push(cell.trim());
+  if (row.some(value => value !== '')) rows.push(row);
+  return rows;
+}
+
+function mapCsvProducts(buffer) {
+  const text = buffer.toString('utf8').replace(/^\uFEFF/, '');
+  const rows = parseCsv(text);
+  if (rows.length < 2) return [];
+
+  const headers = rows[0].map(header => header.trim().toLowerCase());
+  return rows.slice(1).map(row => {
+    const item = {};
+    headers.forEach((header, index) => {
+      item[header] = row[index] ?? '';
+    });
+    return {
+      id: item.id || item.product_id || item.product_code,
+      name: item.name || item.product_name,
+      category: item.category || 'motor',
+      brand: item.brand || item.maker || item.manufacturer,
+      price: Number(String(item.price || '0').replace(/[^0-9]/g, '')),
+      image: item.image || item.image_url || '',
+      description: item.description || '',
+      stock: Number(String(item.stock || '50').replace(/[^0-9]/g, '')) || 0,
+      is_active: parseBooleanFlag(item.is_active || item.active, true)
+    };
+  });
+}
+
 app.post('/api/products', requireAdmin, async (req, res) => {
-  const { id, name, category, price, image, description, specs, stock } = req.body;
+  const { id, name, category, price, image, description, specs, stock, brand, is_active } = req.body;
   if (!id || !name || !category || !price) {
     return res.status(400).json({ message: '필수 상품 정보(ID, 상품명, 카테고리, 가격)를 입력해주세요.' });
   }
@@ -1787,8 +1882,8 @@ app.post('/api/products', requireAdmin, async (req, res) => {
     }
 
     await pool.query(
-      'INSERT INTO products (id, name, category, price, image, description, specs, stock) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      [id, name, category, price, image, description, JSON.stringify(specs || {}), stock || 50]
+      'INSERT INTO products (id, name, category, brand, price, image, description, specs, stock, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [id, name, category, normalizeBrand(brand), price, image, description, JSON.stringify(specs || {}), stock || 50, parseBooleanFlag(is_active, true)]
     );
 
     res.status(201).json({ message: '상품이 성공적으로 등록되었습니다.' });
@@ -1799,7 +1894,7 @@ app.post('/api/products', requireAdmin, async (req, res) => {
 });
 
 app.put('/api/products/:id', requireAdmin, async (req, res) => {
-  const { name, category, price, image, description, specs, stock } = req.body;
+  const { name, category, price, image, description, specs, stock, brand, is_active } = req.body;
   const productId = req.params.id;
 
   const priceWarning = await validateProductPrice(Number(price), category, productId);
@@ -1814,14 +1909,71 @@ app.put('/api/products/:id', requireAdmin, async (req, res) => {
     }
 
     await pool.query(
-      'UPDATE products SET name = ?, category = ?, price = ?, image = ?, description = ?, specs = ?, stock = ? WHERE id = ?',
-      [name, category, price, image, description, JSON.stringify(specs || {}), stock, productId]
+      'UPDATE products SET name = ?, category = ?, brand = ?, price = ?, image = ?, description = ?, specs = ?, stock = ?, is_active = ? WHERE id = ?',
+      [name, category, normalizeBrand(brand), price, image, description, JSON.stringify(specs || {}), stock, parseBooleanFlag(is_active, true), productId]
     );
 
     res.json({ message: '상품 정보가 수정되었습니다.' });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: '서버 내부 오류' });
+  }
+});
+
+app.patch('/api/products/:id/active', requireAdmin, async (req, res) => {
+  try {
+    await pool.query(
+      'UPDATE products SET is_active = ? WHERE id = ? AND is_deleted = FALSE',
+      [parseBooleanFlag(req.body.is_active, true), req.params.id]
+    );
+    res.json({ success: true });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+app.post('/api/products/bulk-upload', requireAdmin, csvUpload.single('file'), async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ message: 'CSV file is required.' });
+  }
+
+  const items = mapCsvProducts(req.file.buffer)
+    .filter(item => item.id && item.name && item.category && item.price > 0)
+    .map(item => ({
+      ...item,
+      brand: normalizeBrand(item.brand)
+    }));
+
+  if (items.length === 0) {
+    return res.status(400).json({ message: 'No valid product rows found in CSV.' });
+  }
+
+  const connection = await pool.getConnection();
+  let inserted = 0;
+  let skipped = 0;
+  try {
+    await connection.beginTransaction();
+    for (const item of items) {
+      const [existing] = await connection.query('SELECT id FROM products WHERE id = ?', [item.id]);
+      if (existing.length > 0) {
+        skipped += 1;
+        continue;
+      }
+      await connection.query(
+        'INSERT INTO products (id, name, category, brand, price, image, description, specs, stock, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [item.id, item.name, item.category, item.brand, item.price, item.image, item.description, JSON.stringify({}), item.stock, item.is_active]
+      );
+      inserted += 1;
+    }
+    await connection.commit();
+    res.json({ success: true, inserted, skipped });
+  } catch (error) {
+    await connection.rollback();
+    console.error(error);
+    res.status(500).json({ message: 'CSV upload failed.' });
+  } finally {
+    connection.release();
   }
 });
 

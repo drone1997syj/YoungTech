@@ -168,9 +168,9 @@ export const ShopProvider = ({ children }) => {
   };
 
   // Initialize and load products and user session
-  const fetchProducts = async () => {
+  const fetchProducts = async (includeInactive = false) => {
     try {
-      const data = await apiFetch('/products');
+      const data = await apiFetch(`/products${includeInactive ? '?includeInactive=true' : ''}`);
       setProducts(data);
     } catch (err) {
       console.error('Failed to load products:', err);
@@ -400,7 +400,7 @@ export const ShopProvider = ({ children }) => {
         method: 'POST',
         body: JSON.stringify(productData)
       });
-      await fetchProducts(); // Refresh list
+      await fetchProducts(user?.role === 'admin'); // Refresh list
       return { success: true };
     } catch (err) {
       return { success: false, message: err.message, isWarning: err.isWarning };
@@ -413,10 +413,23 @@ export const ShopProvider = ({ children }) => {
         method: 'PUT',
         body: JSON.stringify(productData)
       });
-      await fetchProducts(); // Refresh list
+      await fetchProducts(user?.role === 'admin'); // Refresh list
       return { success: true };
     } catch (err) {
       return { success: false, message: err.message, isWarning: err.isWarning };
+    }
+  };
+
+  const updateProductActive = async (productId, isActive) => {
+    try {
+      await apiFetch(`/products/${productId}/active`, {
+        method: 'PATCH',
+        body: JSON.stringify({ is_active: isActive })
+      });
+      await fetchProducts(user?.role === 'admin');
+      return { success: true };
+    } catch (err) {
+      return { success: false, message: err.message };
     }
   };
 
@@ -425,7 +438,7 @@ export const ShopProvider = ({ children }) => {
       await apiFetch(`/products/${productId}`, {
         method: 'DELETE'
       });
-      await fetchProducts(); // Refresh list
+      await fetchProducts(user?.role === 'admin'); // Refresh list
       return { success: true };
     } catch (err) {
       return { success: false, message: err.message };
@@ -760,6 +773,7 @@ export const ShopProvider = ({ children }) => {
       updateOrderStatus,
       createProduct,
       updateProduct,
+      updateProductActive,
       deleteProduct,
       fetchReviews,
       createReview,

@@ -206,6 +206,36 @@ export async function initDb() {
       console.log('Successfully checked/added deleted_at column to products.');
     } catch (err) {}
 
+    try {
+      await connection.query(`ALTER TABLE products ADD COLUMN brand VARCHAR(50) NOT NULL DEFAULT '기타' AFTER category`);
+      console.log('Successfully checked/added brand column to products.');
+    } catch (err) {}
+
+    try {
+      await connection.query(`ALTER TABLE products ADD COLUMN is_active BOOLEAN DEFAULT TRUE AFTER is_deleted`);
+      console.log('Successfully checked/added is_active column to products.');
+    } catch (err) {}
+
+    try {
+      await connection.query(`
+        UPDATE products
+        SET brand = CASE
+          WHEN LOWER(id) LIKE '%panasonic%' OR LOWER(name) LIKE '%panasonic%' THEN '파나소닉'
+          WHEN LOWER(id) LIKE '%mitsubishi%' OR LOWER(name) LIKE '%mitsubishi%' THEN '미쓰비시'
+          WHEN LOWER(id) LIKE '%fastech%' OR LOWER(name) LIKE '%fastech%' OR LOWER(name) LIKE '%ezi-servo%' THEN '파스텍'
+          WHEN LOWER(id) LIKE '%inovance%' OR LOWER(name) LIKE '%inovance%' THEN '이노밴스'
+          WHEN LOWER(id) LIKE '%nidec%' OR LOWER(name) LIKE '%nidec%' OR LOWER(id) LIKE '%shimpo%' OR LOWER(name) LIKE '%shimpo%' THEN '니덱'
+          WHEN LOWER(id) LIKE '%moons%' OR LOWER(name) LIKE '%moons%' THEN '문스'
+          WHEN LOWER(id) LIKE '%nikki%' OR LOWER(name) LIKE '%nikki%' THEN '닛키덴소'
+          WHEN LOWER(id) LIKE '%rs-%' OR LOWER(name) LIKE '%rs automation%' THEN 'RS오토메이션'
+          ELSE COALESCE(NULLIF(brand, ''), '기타')
+        END
+        WHERE category = 'motor'
+      `);
+    } catch (err) {
+      console.warn('Skipped motor brand auto-mapping:', err.message);
+    }
+
     // 3. orders table
     await connection.query(`
       CREATE TABLE IF NOT EXISTS orders (
@@ -430,6 +460,7 @@ export async function initDb() {
     await ensureIndex(connection, 'claims', 'idx_claims_status_created', '`status`, `created_at`');
     await ensureIndex(connection, 'products', 'idx_products_category_sort', '`category`, `sort_order`');
     await ensureIndex(connection, 'products', 'idx_products_deleted_category_sort', '`is_deleted`, `category`, `sort_order`');
+    await ensureIndex(connection, 'products', 'idx_products_category_brand_active', '`category`, `brand`, `is_active`, `is_deleted`');
     await ensureIndex(connection, 'reviews', 'idx_reviews_product_created', '`product_id`, `created_at`');
     await ensureIndex(connection, 'qna', 'idx_qna_product_created', '`product_id`, `created_at`');
     await ensureIndex(connection, 'social_link_verifications', 'idx_social_link_verify_user', '`user_id`, `provider`, `created_at`');

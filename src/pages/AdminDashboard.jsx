@@ -10,7 +10,7 @@ export default function AdminDashboard() {
   const { 
     user, navigate, fetchAdminStats, fetchAllOrders, updateOrderStatus,
 
-    createProduct, updateProduct, deleteProduct, products, fetchProducts,
+    createProduct, updateProduct, updateProductActive, deleteProduct, products, fetchProducts,
     categories, createCategory, updateCategory, deleteCategory, reorderCategories, reorderProducts,
     backendUrl
   } = useShop();
@@ -20,6 +20,8 @@ export default function AdminDashboard() {
     if (!user || user.role !== 'admin') {
       alert('관리자만 접근할 수 있는 영역입니다.');
       navigate('home');
+    } else {
+      fetchProducts(true);
     }
   }, [user]);
 
@@ -60,7 +62,7 @@ export default function AdminDashboard() {
   const [showProductModal, setShowProductModal] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
   const [prodForm, setProdForm] = useState({
-    id: '', name: '', category: 'motor', price: '', image: '', images: [], description: '', stock: 50,
+    id: '', name: '', category: 'motor', brand: '', price: '', image: '', images: [], description: '', stock: 50, is_active: true,
     specs: { '메이커': '', '스펙설명': '' }
   });
   const [formError, setFormError] = useState('');
@@ -393,6 +395,35 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleCsvUpload = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      const token = localStorage.getItem('yt_token');
+      const res = await fetch(`${backendUrl}/api/products/bulk-upload`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`
+        },
+        body: formData
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.message || 'CSV 업로드에 실패했습니다.');
+      }
+      alert(`CSV 등록 완료: ${data.inserted}개 추가, ${data.skipped}개 중복 제외`);
+      await fetchProducts(true);
+    } catch (err) {
+      console.error(err);
+      alert(err.message || 'CSV 업로드 중 오류가 발생했습니다.');
+    }
+  };
+
   // Copy Product function
   const handleCopyProduct = (p) => {
     setEditingProduct(null); // Copy counts as new product creation
@@ -412,11 +443,13 @@ export default function AdminDashboard() {
       id: `${p.id}-copy`,
       name: `${p.name} (복사본)`,
       category: p.category,
+      brand: p.brand || '',
       price: p.price,
       image: p.image,
       images: p.image ? p.image.split(',').filter(Boolean) : [],
       description: p.description || '',
       stock: p.stock || 50,
+      is_active: p.is_active !== false && p.is_active !== 0,
       specs: parsedSpecs
     });
 
@@ -533,7 +566,7 @@ export default function AdminDashboard() {
   const openAddModal = (initialCategory = 'motor') => {
     setEditingProduct(null);
     setProdForm({
-      id: '', name: '', category: initialCategory, price: '', image: '', images: [], description: '', stock: 50,
+      id: '', name: '', category: initialCategory, brand: '', price: '', image: '', images: [], description: '', stock: 50, is_active: true,
       specs: { '메이커': '', '상세정보': '' }
     });
     setFormError('');
@@ -547,11 +580,13 @@ export default function AdminDashboard() {
       id: p.id,
       name: p.name,
       category: p.category,
+      brand: p.brand || '',
       price: p.price,
       image: p.image || '',
       images: p.image ? p.image.split(',').filter(Boolean) : [],
       description: p.description || '',
       stock: p.stock || 0,
+      is_active: p.is_active !== false && p.is_active !== 0,
       specs: p.specs || { '메이커': '', '상세정보': '' }
     });
     setFormError('');
@@ -1083,6 +1118,16 @@ export default function AdminDashboard() {
                         </div>
                       </div>
 
+                      <input
+                        id="product-csv-upload"
+                        type="file"
+                        accept=".csv,text/csv"
+                        onChange={handleCsvUpload}
+                        style={{ display: 'none' }}
+                      />
+                      <label htmlFor="product-csv-upload" className="btn btn-secondary py-2 px-3 text-xs flex items-center gap-1 cursor-pointer">
+                        <Upload size={14} /> CSV 일괄 등록
+                      </label>
                       <button onClick={() => setShowCategorySelector(true)} className="btn btn-primary py-2 px-3 text-xs flex items-center gap-1">
                         <Plus size={14} /> 신규 상품 등록
                       </button>
@@ -1156,6 +1201,7 @@ export default function AdminDashboard() {
                                   </td>
                                   <td className="py-3 px-2"><span className="badge badge-purple text-xs px-2 py-0.5">{categoryName}</span></td>
                                   <td className="py-3 px-2 font-bold text-base">{p.name}</td>
+                                  <td className="py-3 px-2 text-xs font-bold text-slate-600">{p.brand || '-'}</td>
                                   <td className="py-3 px-2 font-bold text-base">{p.price.toLocaleString()}원</td>
                                   <td className="py-3 px-2 text-base">
                                     {p.stock === 0 ? (
@@ -1163,6 +1209,19 @@ export default function AdminDashboard() {
                                     ) : (
                                       <span className="font-semibold">{p.stock}개</span>
                                     )}
+                                  </td>
+                                  <td className="py-3 px-2">
+                                    <button
+                                      type="button"
+                                      onClick={async () => {
+                                        const nextActive = !(p.is_active !== false && p.is_active !== 0);
+                                        const res = await updateProductActive(p.id, nextActive);
+                                        if (!res.success) alert(res.message || '노출 상태 변경 실패');
+                                      }}
+                                      className={`btn py-1 px-3 text-2xs font-bold ${(p.is_active !== false && p.is_active !== 0) ? 'btn-secondary text-green-700 bg-green-50 border-green-200' : 'btn-secondary text-slate-500 bg-slate-100 border-slate-200'}`}
+                                    >
+                                      {(p.is_active !== false && p.is_active !== 0) ? '노출중' : '숨김'}
+                                    </button>
                                   </td>
                                   <td className="py-3 px-2 text-xs text-light">{p.created_at ? formatOrderDateTime(p.created_at) : '-'}</td>
                                   <td className="py-3 px-2 text-center flex justify-center items-center gap-2">
@@ -2020,6 +2079,26 @@ export default function AdminDashboard() {
             )}
 
             <form onSubmit={handleProductSubmit} className="flex flex-col gap-4">
+              <div className="grid grid-cols-2 gap-4 bg-slate-50 border rounded-xl p-3">
+                <div className="form-group">
+                  <label className="form-label text-xs font-bold mb-1">브랜드</label>
+                  <input
+                    type="text"
+                    className="form-input text-xs"
+                    value={prodForm.brand || ''}
+                    onChange={(e) => setProdForm({...prodForm, brand: e.target.value})}
+                    placeholder="예: 파나소닉, 미쓰비시, 파스텍"
+                  />
+                </div>
+                <label className="form-group flex items-center gap-2 pt-6 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={prodForm.is_active !== false}
+                    onChange={(e) => setProdForm({...prodForm, is_active: e.target.checked})}
+                  />
+                  <span className="text-xs font-bold text-dark">고객 화면에 노출</span>
+                </label>
+              </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="form-group">
                   <label className="form-label text-xs font-bold mb-1">상품 고유 ID *</label>
