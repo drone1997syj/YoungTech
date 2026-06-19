@@ -51,7 +51,6 @@ export default function AdminDashboard() {
     setProdPage(1);
   }, [prodFilter, prodSortField, prodSortDirection]);
 
-  const [newCatId, setNewCatId] = useState('');
   const [newCatName, setNewCatName] = useState('');
   const [newCatParentId, setNewCatParentId] = useState('');
   const [catError, setCatError] = useState('');
@@ -375,23 +374,56 @@ export default function AdminDashboard() {
     setCatSuccess('');
   };
 
+  const createCategoryIdFromName = (name) => {
+    const normalized = String(name || '').trim().toLowerCase();
+    const knownIds = {
+      '모터': 'motor',
+      '감속기': 'reducer',
+      '로봇': 'robot',
+      '볼스크류/lm': 'motion',
+      '볼스크류': 'ball-screw',
+      '서보모터': 'servo-motor',
+      '서보드라이브': 'servo-drive',
+      '케이블': 'cable',
+      '파나소닉': 'panasonic',
+      '미쓰비시': 'mitsubishi',
+      '이노밴스': 'inovance',
+      '파스텍': 'fastech',
+      '니덱': 'nidec',
+      '닛키덴소': 'nikki-denso',
+      '문스': 'moons',
+      'rs오토메이션': 'rs-automation'
+    };
+    const mappedId = knownIds[normalized];
+    const baseId = mappedId || normalized
+      .replace(/&/g, 'and')
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+    const fallbackId = `item-${Date.now().toString(36)}`;
+    const seedId = baseId || fallbackId;
+    const usedIds = new Set(localCategories.map((cat) => cat.id));
+    if (!usedIds.has(seedId)) return seedId;
+
+    let suffix = 2;
+    while (usedIds.has(`${seedId}-${suffix}`)) {
+      suffix += 1;
+    }
+    return `${seedId}-${suffix}`;
+  };
+
   const handleAddCategoryDraft = () => {
-    const id = newCatId.trim();
     const name = newCatName.trim();
     const parentId = normalizeCategoryParentId(newCatParentId);
-    if (!id || !name) {
-      setCatError('카테고리 ID와 이름을 입력해 주세요.');
-      return;
-    }
-    if (localCategories.some((cat) => cat.id === id) || categories.some((cat) => cat.id === id)) {
-      setCatError('이미 사용 중인 카테고리 ID입니다.');
+    if (!name) {
+      setCatError('품목명을 입력해 주세요.');
       return;
     }
     if (parentId && !localCategories.some((cat) => cat.id === parentId)) {
-      setCatError('상위 카테고리를 찾을 수 없습니다.');
+      setCatError('상위 품목을 찾을 수 없습니다.');
       return;
     }
 
+    const id = createCategoryIdFromName(name);
     const siblingCount = localCategories.filter((cat) => normalizeCategoryParentId(cat.parent_id) === parentId).length;
     setLocalCategories(prev => [
       ...prev,
@@ -404,7 +436,6 @@ export default function AdminDashboard() {
         updated_at: new Date().toISOString()
       }
     ]);
-    setNewCatId('');
     setNewCatName('');
     setNewCatParentId('');
     setCatError('');
@@ -2010,27 +2041,6 @@ export default function AdminDashboard() {
                       <h3 className="font-extrabold text-dark text-lg">품목 관리</h3>
                       <p className="text-xs text-light mt-1">전체 카테고리의 하위 품목을 추가, 수정, 삭제하고 순서를 정리합니다.</p>
                     </div>
-                    <div className="flex items-center gap-2">
-                      {categoryDirty && (
-                        <span className="text-xs font-bold text-amber-600">저장되지 않은 변경사항 있음</span>
-                      )}
-                      <button
-                        type="button"
-                        onClick={handleResetCategoryDraft}
-                        disabled={!categoryDirty || savingCategories}
-                        className="btn btn-secondary py-2 px-3 text-xs font-bold"
-                      >
-                        되돌리기
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleSaveCategories}
-                        disabled={!categoryDirty || savingCategories}
-                        className={`btn btn-primary py-2 px-4 text-xs font-bold ${!categoryDirty ? 'opacity-50 cursor-not-allowed' : ''}`}
-                      >
-                        {savingCategories ? '저장 중...' : '변경사항 저장'}
-                      </button>
-                    </div>
                   </div>
 
                   <div className="grid grid-cols-1 lg:grid-cols-[320px_minmax(0,1fr)] gap-6">
@@ -2047,17 +2057,6 @@ export default function AdminDashboard() {
                           <CheckCircle size={12} /> {catSuccess}
                         </div>
                       )}
-
-                      <div className="form-group mb-3">
-                        <label className="form-label text-xs font-bold mb-1">품목 ID *</label>
-                        <input
-                          type="text"
-                          className="form-input text-xs"
-                          value={newCatId}
-                          onChange={(e) => setNewCatId(e.target.value)}
-                          placeholder="예: motor-servo"
-                        />
-                      </div>
 
                       <div className="form-group mb-3">
                         <label className="form-label text-xs font-bold mb-1">품목명 *</label>
@@ -2086,13 +2085,23 @@ export default function AdminDashboard() {
                         </select>
                       </div>
 
-                      <button
-                        type="button"
-                        onClick={handleAddCategoryDraft}
-                        className="btn btn-primary w-full py-2 text-xs font-bold"
-                      >
-                        추가
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={handleAddCategoryDraft}
+                          className="btn btn-primary flex-1 py-2 text-xs font-bold"
+                        >
+                          추가
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleSaveCategories}
+                          disabled={!categoryDirty || savingCategories}
+                          className={`btn btn-secondary flex-1 py-2 text-xs font-bold ${!categoryDirty ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        >
+                          {savingCategories ? '저장 중...' : '저장'}
+                        </button>
+                      </div>
                       <p className="text-2xs text-light mt-3 leading-relaxed">
                         추가, 수정, 삭제, 순서 변경은 저장 버튼을 눌러야 실제 홈페이지에 반영됩니다.
                       </p>
@@ -2118,13 +2127,12 @@ export default function AdminDashboard() {
                             return (
                               <div key={item.id} className={`admin-category-node ${draggedCategoryId === item.id ? 'dragging' : ''}`}>
                                 <div
-                                  className="admin-category-node-row"
+                                  className={`admin-category-node-row ${depth > 0 ? 'is-child' : 'is-parent'}`}
                                   draggable
                                   onDragStart={() => handleCategoryDragStart(item.id)}
                                   onDragOver={(e) => e.preventDefault()}
                                   onDrop={() => handleCategoryDrop(item.id)}
                                   onDragEnd={handleCategoryDragEnd}
-                                  style={{ paddingLeft: `${depth * 18}px` }}
                                 >
                                   <button type="button" className="admin-category-drag-handle" aria-label="품목 순서 변경">
                                     <GripVertical size={14} />
@@ -2225,6 +2233,17 @@ export default function AdminDashboard() {
                             등록된 품목이 없습니다.
                           </div>
                         )}
+                      </div>
+
+                      <div className="flex justify-end mt-5">
+                        <button
+                          type="button"
+                          onClick={handleSaveCategories}
+                          disabled={!categoryDirty || savingCategories}
+                          className={`btn btn-primary py-2 px-5 text-xs font-bold ${!categoryDirty ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        >
+                          {savingCategories ? '저장 중...' : '저장'}
+                        </button>
                       </div>
                     </div>
                   </div>
