@@ -636,10 +636,30 @@ export default function AdminDashboard() {
     }
   };
 
+  const applyOrderStatusLocally = (orderId, newStatus) => {
+    const terminalStatuses = new Set(['cancelled', 'returned', 'refunded', 'exchanged', 'confirmed']);
+
+    setOrders(prevOrders => prevOrders.map(order => {
+      if (order.id !== orderId) return order;
+
+      const updatedItems = (order.order_items || []).map(item => {
+        const itemStatus = item.status || order.status;
+        if (terminalStatuses.has(itemStatus)) return item;
+        return { ...item, status: newStatus };
+      });
+
+      return {
+        ...order,
+        status: newStatus,
+        order_items: updatedItems
+      };
+    }));
+  };
+
   const handleStatusChange = async (orderId, newStatus) => {
     const res = await updateOrderStatus(orderId, newStatus);
     if (res.success) {
-      await loadStatsData();
+      applyOrderStatusLocally(orderId, newStatus);
     } else {
       alert(res.message);
     }
