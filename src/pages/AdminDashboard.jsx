@@ -368,6 +368,7 @@ export default function AdminDashboard() {
   const categoryTreeData = buildCategoryTree(localCategories);
   const categoryTree = categoryTreeData.tree;
   const categoryLookup = categoryTreeData.lookup;
+  const parentCategoryOptions = categoryTree;
 
   const markCategoryDirty = () => {
     setCategoryDirty(true);
@@ -2077,7 +2078,7 @@ export default function AdminDashboard() {
                           onChange={(e) => setNewCatParentId(e.target.value)}
                         >
                           <option value="">최상위 품목</option>
-                          {localCategories.map((cat) => (
+                          {parentCategoryOptions.map((cat) => (
                             <option key={cat.id} value={cat.id}>
                               {(categoryLookup.get(cat.id)?.name || cat.name)}
                             </option>
@@ -2187,7 +2188,7 @@ export default function AdminDashboard() {
                                           className="form-select text-xs"
                                         >
                                           <option value="">최상위 품목</option>
-                                          {localCategories.filter((cat) => !blockedParents.has(cat.id)).map((cat) => (
+                                          {parentCategoryOptions.filter((cat) => !blockedParents.has(cat.id)).map((cat) => (
                                             <option key={cat.id} value={cat.id}>{cat.name}</option>
                                           ))}
                                         </select>
