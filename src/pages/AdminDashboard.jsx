@@ -453,9 +453,22 @@ export default function AdminDashboard() {
     setNewCatName('');
     setNewCatParentId('');
     setCatError('');
+    if (parentId) {
+      setExpandedCategoryIds((prev) => {
+        const next = new Set(prev);
+        next.add(parentId);
+        return next;
+      });
+    }
     markCategoryDirty();
   };
 
+
+  const cancelCategoryInlineAdd = () => {
+    setNewCatName('');
+    setNewCatParentId('');
+    setCatError('');
+  };
   const handleUpdateCategoryDraft = (id) => {
     const name = editingCatName.trim();
     const parentId = normalizeCategoryParentId(editingCatParentId);
@@ -2042,240 +2055,255 @@ export default function AdminDashboard() {
 
               {/* Tab 5: Categories */}
               {activeTab === 'categories' && (
-                <div className="tab-categories flex flex-col gap-6">
+                <div className="tab-categories flex flex-col gap-6 animate-fade-in">
                   <div className="flex items-end justify-between gap-4 flex-wrap">
                     <div>
-                      <h3 className="font-extrabold text-dark text-lg">품목 관리</h3>
-                      <p className="text-xs text-light mt-1">전체 카테고리의 하위 품목을 추가, 수정, 삭제하고 순서를 정리합니다.</p>
+                      <h3 className="font-extrabold text-dark text-lg">?? ??</h3>
+                      <p className="text-xs text-light mt-1">?? ????? ?? ????? ??, ??, ???? ??? ?????.</p>
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 lg:grid-cols-[320px_minmax(0,1fr)] gap-6">
-                    <div className="card p-5 h-fit">
-                      <h4 className="font-bold text-dark text-sm mb-4">하위 품목 추가</h4>
-
+                  {(catError || catSuccess) && (
+                    <div className="flex flex-col gap-2">
                       {catError && (
-                        <div className="alert-box alert-danger mb-3 text-xs font-semibold flex items-center gap-1">
+                        <div className="alert-box alert-danger text-xs font-semibold flex items-center gap-1">
                           <AlertTriangle size={12} /> {catError}
                         </div>
                       )}
                       {catSuccess && (
-                        <div className="alert-box alert-success mb-3 text-xs font-semibold flex items-center gap-1">
+                        <div className="alert-box alert-success text-xs font-semibold flex items-center gap-1">
                           <CheckCircle size={12} /> {catSuccess}
                         </div>
                       )}
+                    </div>
+                  )}
 
-                      <div className="form-group mb-3">
-                        <label className="form-label text-xs font-bold mb-1">품목명 *</label>
-                        <input
-                          type="text"
-                          className="form-input text-xs"
-                          value={newCatName}
-                          onChange={(e) => setNewCatName(e.target.value)}
-                          placeholder="예: 서보모터"
-                        />
+                  <div className="card p-5">
+                    <div className="flex items-center justify-between gap-3 mb-4">
+                      <div>
+                        <h4 className="font-bold text-dark text-sm">?? ??</h4>
+                        <p className="text-xs text-light mt-1">???? ?? ?? ??? ??? ?? ? ????.</p>
                       </div>
-
-                      <div className="form-group mb-4">
-                        <label className="form-label text-xs font-bold mb-1">상위 품목</label>
-                        <select
-                          className="form-select text-xs"
-                          value={newCatParentId}
-                          onChange={(e) => setNewCatParentId(e.target.value)}
-                        >
-                          <option value="">최상위 품목</option>
-                          {parentCategoryOptions.map((cat) => (
-                            <option key={cat.id} value={cat.id}>
-                              {(categoryLookup.get(cat.id)?.name || cat.name)}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={handleAddCategoryDraft}
-                            className="btn btn-primary py-2 px-4 text-xs font-bold w-fit"
-                          >
-                            추가
-                          </button>
-                        </div>
+                      <span className="text-2xs text-light font-bold">? {localCategories.length}?</span>
                     </div>
 
-                    <div className="card p-5">
-                      <div className="flex items-center justify-between gap-3 mb-4">
-                        <div>
-                          <h4 className="font-bold text-dark text-sm">품목 목록</h4>
-                          <p className="text-xs text-light mt-1">드래그로 같은 단계 안에서 순서를 바꿀 수 있습니다.</p>
-                        </div>
-                        <span className="text-2xs text-light font-bold">총 {localCategories.length}개</span>
-                      </div>
+                    <div className="admin-category-tree">
+                      {categoryTree.map((node) => {
+                        const renderNode = (item, depth = 0) => {
+                          const children = Array.isArray(item.children) ? item.children : [];
+                          const blockedParents = new Set([item.id, ...getCategoryDescendantIds(localCategories, item.id)]);
+                          const isEditing = editingCatId === item.id;
+                          const isExpanded = expandedCategoryIds.has(item.id);
+                          const hasChildren = children.length > 0;
+                          const isInlineAdding = normalizeCategoryParentId(newCatParentId) === item.id;
 
-                      <div className="admin-category-tree">
-                        {categoryTree.map((node) => {
-                          const renderNode = (item, depth = 0) => {
-                            const children = Array.isArray(item.children) ? item.children : [];
-                            const blockedParents = new Set([item.id, ...getCategoryDescendantIds(localCategories, item.id)]);
-                            const isEditing = editingCatId === item.id;
-                            const isExpanded = expandedCategoryIds.has(item.id);
-                            const hasChildren = children.length > 0;
-
-                            return (
-                              <div key={item.id} className={`admin-category-node ${draggedCategoryId === item.id ? 'dragging' : ''}`}>
-                                <div
-                                  className={`admin-category-node-row ${depth > 0 ? 'is-child' : 'is-parent'}`}
-                                  draggable
-                                  onDoubleClick={(e) => {
-                                    const target = e.target;
-                                    if (target.closest('button')) return;
-                                    if (hasChildren) toggleCategoryExpanded(item.id);
-                                  }}
-                                  onDragStart={() => handleCategoryDragStart(item.id)}
-                                  onDragOver={(e) => e.preventDefault()}
-                                  onDrop={() => handleCategoryDrop(item.id)}
-                                  onDragEnd={handleCategoryDragEnd}
-                                >
-                                  <button type="button" className="admin-category-drag-handle" aria-label="품목 순서 변경">
-                                    <GripVertical size={14} />
-                                  </button>
-                                  <div className="admin-category-node-main">
-                                    <div className="admin-category-node-title-row">
-                                      {hasChildren ? (
-                                        <button
-                                          type="button"
-                                          className={`admin-category-expand ${isExpanded ? 'is-open' : ''}`}
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            toggleCategoryExpanded(item.id);
-                                          }}
-                                          aria-label={isExpanded ? '하위 품목 접기' : '하위 품목 펼치기'}
-                                        >
-                                          <ChevronRight size={13} />
-                                        </button>
-                                      ) : (
-                                        <span className="admin-category-expand-spacer" />
-                                      )}
+                          return (
+                            <div key={item.id} className={`admin-category-node ${draggedCategoryId === item.id ? 'dragging' : ''}`}>
+                              <div
+                                className={`admin-category-node-row ${depth > 0 ? 'is-child' : 'is-parent'}`}
+                                draggable
+                                onDoubleClick={(e) => {
+                                  const target = e.target;
+                                  if (target.closest('button')) return;
+                                  if (hasChildren) toggleCategoryExpanded(item.id);
+                                }}
+                                onDragStart={() => handleCategoryDragStart(item.id)}
+                                onDragOver={(e) => e.preventDefault()}
+                                onDrop={() => handleCategoryDrop(item.id)}
+                                onDragEnd={handleCategoryDragEnd}
+                              >
+                                <button type="button" className="admin-category-drag-handle" aria-label="?? ?? ??">
+                                  <GripVertical size={14} />
+                                </button>
+                                <div className="admin-category-node-main">
+                                  <div className="admin-category-node-title-row">
+                                    {hasChildren ? (
                                       <button
                                         type="button"
-                                        className="admin-category-node-title-button"
+                                        className={`admin-category-expand ${isExpanded ? 'is-open' : ''}`}
                                         onClick={(e) => {
                                           e.stopPropagation();
-                                          if (hasChildren) toggleCategoryExpanded(item.id);
+                                          toggleCategoryExpanded(item.id);
                                         }}
+                                        aria-label={isExpanded ? '?? ???? ??' : '?? ???? ???'}
                                       >
-                                        {item.name}
+                                        <ChevronRight size={13} />
                                       </button>
-                                    </div>
-                                    <div className="admin-category-node-meta">
-                                      <span>서브카테고리 {children.length}개</span>
-                                    </div>
-                                  </div>
-                                  <div className="admin-category-node-actions">
+                                    ) : (
+                                      <span className="admin-category-expand-spacer" />
+                                    )}
                                     <button
                                       type="button"
-                                      onClick={() => {
-                                        setEditingCatId(item.id);
-                                        setEditingCatName(item.name);
-                                        setEditingCatParentId(item.parent_id || '');
+                                      className="admin-category-node-title-button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (hasChildren) toggleCategoryExpanded(item.id);
                                       }}
-                                      className="admin-mini-action"
                                     >
-                                      수정
+                                      {item.name}
                                     </button>
+                                  </div>
+                                  <div className="admin-category-node-meta">
+                                    <span>?? ???? {children.length}?</span>
                                     <button
                                       type="button"
-                                      onClick={() => handleDeleteCategoryDraft(item)}
-                                      className="admin-mini-action danger"
+                                      className="admin-mini-action admin-inline-add-trigger"
+                                      onClick={() => {
+                                        setEditingCatId(null);
+                                        setEditingCatName('');
+                                        setEditingCatParentId('');
+                                        setNewCatName('');
+                                        setNewCatParentId(item.id);
+                                        setCatError('');
+                                        setCatSuccess('');
+                                      }}
                                     >
-                                      삭제
+                                      ?? ???? ??
                                     </button>
                                   </div>
                                 </div>
+                                <div className="admin-category-node-actions">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setNewCatName('');
+                                      setNewCatParentId('');
+                                      setEditingCatId(item.id);
+                                      setEditingCatName(item.name);
+                                      setEditingCatParentId(item.parent_id || '');
+                                      setCatError('');
+                                      setCatSuccess('');
+                                    }}
+                                    className="admin-mini-action"
+                                  >
+                                    ??
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteCategoryDraft(item)}
+                                    className="admin-mini-action danger"
+                                  >
+                                    ??
+                                  </button>
+                                </div>
+                              </div>
 
-                                {isEditing && (
-                                  <div className="admin-category-edit-panel" style={{ paddingLeft: `${depth * 18 + 34}px` }}>
-                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
-                                      <div>
-                                        <label className="form-label text-2xs font-bold mb-1">품목명</label>
-                                        <input
-                                          type="text"
-                                          value={editingCatName}
-                                          onChange={(e) => setEditingCatName(e.target.value)}
-                                          className="form-input text-xs"
-                                        />
-                                      </div>
-                                      <div>
-                                        <label className="form-label text-2xs font-bold mb-1">상위 품목</label>
-                                        <select
-                                          value={editingCatParentId}
-                                          onChange={(e) => setEditingCatParentId(e.target.value)}
-                                          className="form-select text-xs"
-                                        >
-                                          <option value="">최상위 품목</option>
-                                          {parentCategoryOptions.filter((cat) => !blockedParents.has(cat.id)).map((cat) => (
-                                            <option key={cat.id} value={cat.id}>{cat.name}</option>
-                                          ))}
-                                        </select>
-                                      </div>
-                                      <div className="flex items-center gap-2">
-                                        <button
-                                          type="button"
-                                          onClick={() => handleUpdateCategoryDraft(item.id)}
-                                          className="btn btn-primary py-2 px-3 text-xs font-bold"
-                                        >
-                                          적용
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() => {
-                                            setEditingCatId(null);
-                                            setEditingCatName('');
-                                            setEditingCatParentId('');
-                                          }}
-                                          className="btn btn-secondary py-2 px-3 text-xs font-bold"
-                                        >
-                                          취소
-                                        </button>
-                                      </div>
+                              {isInlineAdding && (
+                                <div className="admin-category-inline-add" style={{ paddingLeft: `${depth * 18 + 34}px` }}>
+                                  <div className="admin-category-inline-add-row">
+                                    <div className="admin-category-inline-add-field">
+                                      <label className="form-label text-2xs font-bold mb-1">?? ?????</label>
+                                      <input
+                                        type="text"
+                                        value={newCatName}
+                                        onChange={(e) => setNewCatName(e.target.value)}
+                                        className="form-input text-xs"
+                                        placeholder="?: ????"
+                                      />
+                                    </div>
+                                    <div className="admin-category-inline-add-actions">
+                                      <button
+                                        type="button"
+                                        onClick={handleAddCategoryDraft}
+                                        className="btn btn-primary py-2 px-4 text-xs font-bold"
+                                      >
+                                        ??
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={cancelCategoryInlineAdd}
+                                        className="btn btn-secondary py-2 px-4 text-xs font-bold"
+                                      >
+                                        ??
+                                      </button>
                                     </div>
                                   </div>
-                                )}
+                                </div>
+                              )}
 
-                                {hasChildren && isExpanded && (
-                                  <div className="admin-category-children">
-                                    {children.map((child) => renderNode(child, depth + 1))}
+                              {isEditing && (
+                                <div className="admin-category-edit-panel" style={{ paddingLeft: `${depth * 18 + 34}px` }}>
+                                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+                                    <div>
+                                      <label className="form-label text-2xs font-bold mb-1">???</label>
+                                      <input
+                                        type="text"
+                                        value={editingCatName}
+                                        onChange={(e) => setEditingCatName(e.target.value)}
+                                        className="form-input text-xs"
+                                      />
+                                    </div>
+                                    <div>
+                                      <label className="form-label text-2xs font-bold mb-1">?? ??</label>
+                                      <select
+                                        value={editingCatParentId}
+                                        onChange={(e) => setEditingCatParentId(e.target.value)}
+                                        className="form-select text-xs"
+                                      >
+                                        <option value="">??? ??</option>
+                                        {parentCategoryOptions.filter((cat) => !blockedParents.has(cat.id)).map((cat) => (
+                                          <option key={cat.id} value={cat.id}>{cat.name}</option>
+                                        ))}
+                                      </select>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleUpdateCategoryDraft(item.id)}
+                                        className="btn btn-primary py-2 px-3 text-xs font-bold"
+                                      >
+                                        ??
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setEditingCatId(null);
+                                          setEditingCatName('');
+                                          setEditingCatParentId('');
+                                        }}
+                                        className="btn btn-secondary py-2 px-3 text-xs font-bold"
+                                      >
+                                        ??
+                                      </button>
+                                    </div>
                                   </div>
-                                )}
-                              </div>
-                            );
-                          };
+                                </div>
+                              )}
 
-                          return renderNode(node, 0);
-                        })}
+                              {hasChildren && isExpanded && (
+                                <div className="admin-category-children">
+                                  {children.map((child) => renderNode(child, depth + 1))}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        };
 
-                        {categoryTree.length === 0 && (
-                          <div className="admin-empty-state">
-                            등록된 품목이 없습니다.
-                          </div>
-                        )}
-                      </div>
+                        return renderNode(node, 0);
+                      })}
 
-                      <div className="flex justify-end mt-5">
-                        <button
-                          type="button"
-                          onClick={handleSaveCategories}
-                          disabled={!categoryDirty || savingCategories}
-                          className={`btn btn-primary py-2 px-8 min-w-[160px] text-xs font-bold ${!categoryDirty ? 'opacity-50 cursor-not-allowed' : ''}`}
-                        >
-                          {savingCategories ? '저장 중...' : '저장'}
-                        </button>
-                      </div>
+                      {categoryTree.length === 0 && (
+                        <div className="admin-empty-state">
+                          ??? ??? ????.
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="admin-category-save-bar mt-5">
+                      <button
+                        type="button"
+                        onClick={handleSaveCategories}
+                        disabled={!categoryDirty || savingCategories}
+                        className={`btn btn-primary py-2 px-10 min-w-[200px] text-xs font-bold ${!categoryDirty ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      >
+                        {savingCategories ? '?? ?...' : '???? ??'}
+                      </button>
                     </div>
                   </div>
                 </div>
               )}
               {/* Tab 6: Claims Management */}
+
               {activeTab === 'claims' && (
                 <div className="tab-claims flex flex-col gap-6 animate-fade-in">
                   <div className="flex justify-between items-center">

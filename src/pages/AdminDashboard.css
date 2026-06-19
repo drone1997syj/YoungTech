@@ -519,6 +519,7 @@
 .admin-category-node-meta {
   margin-top: 4px;
   display: flex;
+  align-items: center;
   flex-wrap: wrap;
   gap: 6px;
   color: #94a3b8;
@@ -533,6 +534,18 @@
   border-radius: 999px;
   background: #f8fafc;
   border: 1px solid #e2e8f0;
+}
+
+.admin-inline-add-trigger {
+  padding-inline: 0.7rem;
+  border-color: #ddd6fe;
+  background: #faf5ff;
+  color: #6d28d9;
+}
+
+.admin-inline-add-trigger:hover {
+  background: #f3e8ff;
+  border-color: #c4b5fd;
 }
 
 .admin-category-node-actions {
@@ -571,6 +584,38 @@
 
 .admin-category-edit-panel {
   padding: 0 14px 0 14px;
+}
+
+.admin-category-inline-add {
+  padding: 0 14px 0 14px;
+}
+
+.admin-category-inline-add-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 14px 16px;
+  margin-top: 2px;
+  border: 1px solid #e9d5ff;
+  border-radius: 14px;
+  background: #faf5ff;
+}
+
+.admin-category-inline-add-field {
+  flex: 1;
+  min-width: 240px;
+}
+
+.admin-category-inline-add-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.admin-category-save-bar {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .admin-category-children {
