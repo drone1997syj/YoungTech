@@ -2123,7 +2123,6 @@ export default function AdminDashboard() {
                         {categoryTree.map((node) => {
                           const renderNode = (item, depth = 0) => {
                             const children = Array.isArray(item.children) ? item.children : [];
-                            const parentLabel = item.parent_id ? (categoryLookup.get(item.parent_id)?.name || item.parent_id) : '최상위';
                             const blockedParents = new Set([item.id, ...getCategoryDescendantIds(localCategories, item.id)]);
                             const isEditing = editingCatId === item.id;
                             const isExpanded = expandedCategoryIds.has(item.id);
@@ -2134,6 +2133,11 @@ export default function AdminDashboard() {
                                 <div
                                   className={`admin-category-node-row ${depth > 0 ? 'is-child' : 'is-parent'}`}
                                   draggable
+                                  onDoubleClick={(e) => {
+                                    const target = e.target;
+                                    if (target.closest('button')) return;
+                                    if (hasChildren) toggleCategoryExpanded(item.id);
+                                  }}
                                   onDragStart={() => handleCategoryDragStart(item.id)}
                                   onDragOver={(e) => e.preventDefault()}
                                   onDrop={() => handleCategoryDrop(item.id)}
@@ -2171,9 +2175,7 @@ export default function AdminDashboard() {
                                       </button>
                                     </div>
                                     <div className="admin-category-node-meta">
-                                      <span>{item.id}</span>
-                                      <span>상위: {parentLabel}</span>
-                                      <span>하위 {children.length}개</span>
+                                      <span>서브카테고리 {children.length}개</span>
                                     </div>
                                   </div>
                                   <div className="admin-category-node-actions">
