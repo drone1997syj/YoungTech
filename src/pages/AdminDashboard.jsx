@@ -1552,7 +1552,7 @@ export default function AdminDashboard() {
                             <col style={{ width: '160px' }} />
                           </colgroup>
                           <thead>
-                            <tr className="border-b text-xs text-light font-bold">
+                            <tr className="border-b text-xs text-light font-medium">
                               <th className="py-3 px-2 w-8 text-center">
                                 <input
                                   type="checkbox"
@@ -1575,7 +1575,6 @@ export default function AdminDashboard() {
                             {paginatedProducts.length > 0 ? (
                               paginatedProducts.map((p) => {
                                 const statusMeta = getProductStatusMeta(p);
-                                const productCategoryName = getProductCategoryName(p);
                                 return (
                                   <tr key={p.id} className="border-b text-sm text-dark hover:bg-slate-50 product-row">
                                     <td className="py-3 px-2 text-center">
@@ -1607,11 +1606,6 @@ export default function AdminDashboard() {
                                     <td className="py-3 px-2">
                                       <div className="product-name-cell">
                                         <span className="product-name">{p.name}</span>
-                                        <div className="product-meta-line">
-                                          {productCategoryName && (
-                                            <span className="product-meta-pill">{productCategoryName}</span>
-                                          )}
-                                        </div>
                                       </div>
                                     </td>
                                     <td className="py-3 px-2 text-center">
@@ -1650,7 +1644,7 @@ export default function AdminDashboard() {
                       {(
                         <div className="product-pagination">
                           <div className="product-pagination-info">
-                            ??? {prodPage} / {totalPages}
+                            페이지 {prodPage} / {totalPages}
                           </div>
                           <div className="product-pagination-controls">
                             <button 
@@ -1658,7 +1652,7 @@ export default function AdminDashboard() {
                               onClick={() => setProdPage(prev => Math.max(1, prev - 1))}
                               className="product-pagination-btn"
                             >
-                              ??
+                              ‹
                             </button>
                             {pageNumbers.map(num => (
                               <button
@@ -1674,7 +1668,7 @@ export default function AdminDashboard() {
                               onClick={() => setProdPage(prev => Math.min(totalPages, prev + 1))}
                               className="product-pagination-btn"
                             >
-                              ??
+                              ›
                             </button>
                           </div>
                         </div>
