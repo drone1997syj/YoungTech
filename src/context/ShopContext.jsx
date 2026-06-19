@@ -101,6 +101,7 @@ export const ShopProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
+  const [motorBrands, setMotorBrands] = useState([]);
   const [cart, setCart] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [compareList, setCompareList] = useState([]);
@@ -167,6 +168,15 @@ export const ShopProvider = ({ children }) => {
     }
   };
 
+  const fetchMotorBrands = async () => {
+    try {
+      const data = await apiFetch('/motor-brands');
+      setMotorBrands(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error('Failed to load motor brands:', err);
+    }
+  };
+
   // Initialize and load products and user session
   const fetchProducts = async (includeInactive = false) => {
     try {
@@ -181,6 +191,7 @@ export const ShopProvider = ({ children }) => {
     const initSession = async () => {
       setLoading(true);
       await fetchCategories();
+      await fetchMotorBrands();
       await fetchProducts();
 
       // Load local cart
@@ -732,6 +743,31 @@ export const ShopProvider = ({ children }) => {
     }
   };
 
+  const createMotorBrand = async (name) => {
+    try {
+      await apiFetch('/admin/motor-brands', {
+        method: 'POST',
+        body: JSON.stringify({ name })
+      });
+      await fetchMotorBrands();
+      return { success: true };
+    } catch (err) {
+      return { success: false, message: err.message };
+    }
+  };
+
+  const deleteMotorBrand = async (id) => {
+    try {
+      await apiFetch(`/admin/motor-brands/${id}`, {
+        method: 'DELETE'
+      });
+      await fetchMotorBrands();
+      return { success: true };
+    } catch (err) {
+      return { success: false, message: err.message };
+    }
+  };
+
   return (
     <ShopContext.Provider value={{
       user,
@@ -739,6 +775,10 @@ export const ShopProvider = ({ children }) => {
       fetchProducts,
       categories,
       fetchCategories,
+      motorBrands,
+      fetchMotorBrands,
+      createMotorBrand,
+      deleteMotorBrand,
       createCategory,
       updateCategory,
       deleteCategory,

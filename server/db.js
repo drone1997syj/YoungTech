@@ -190,6 +190,17 @@ export async function initDb() {
       )
     `);
 
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS motor_brands (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(100) NOT NULL UNIQUE,
+        sort_order INT DEFAULT 0,
+        is_active BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
     // Ensure sort_order exists in products
     try {
       await connection.query(`ALTER TABLE products ADD COLUMN sort_order INT DEFAULT 0`);
@@ -461,6 +472,7 @@ export async function initDb() {
     await ensureIndex(connection, 'products', 'idx_products_category_sort', '`category`, `sort_order`');
     await ensureIndex(connection, 'products', 'idx_products_deleted_category_sort', '`is_deleted`, `category`, `sort_order`');
     await ensureIndex(connection, 'products', 'idx_products_category_brand_active', '`category`, `brand`, `is_active`, `is_deleted`');
+    await ensureIndex(connection, 'motor_brands', 'idx_motor_brands_active_sort', '`is_active`, `sort_order`, `name`');
     await ensureIndex(connection, 'reviews', 'idx_reviews_product_created', '`product_id`, `created_at`');
     await ensureIndex(connection, 'qna', 'idx_qna_product_created', '`product_id`, `created_at`');
     await ensureIndex(connection, 'social_link_verifications', 'idx_social_link_verify_user', '`user_id`, `provider`, `created_at`');
@@ -728,6 +740,28 @@ export async function initDb() {
         `, [p.id, p.name, p.category, p.price, p.image, p.description, p.specs, p.stock]);
       }
       console.log('Products seeded.');
+    }
+
+    const [motorBrandRows] = await connection.query('SELECT COUNT(*) as count FROM motor_brands');
+    if (motorBrandRows[0].count === 0) {
+      const [brandRows] = await connection.query(`
+        SELECT DISTINCT brand
+        FROM products
+        WHERE category = 'motor'
+          AND is_deleted = FALSE
+          AND brand IS NOT NULL
+          AND brand <> ''
+        ORDER BY brand ASC
+      `);
+
+      if (brandRows.length > 0) {
+        const values = brandRows.map((row, index) => [row.brand, index + 1]);
+        await connection.query(
+          'INSERT INTO motor_brands (name, sort_order) VALUES ?',
+          [values]
+        );
+        console.log('Motor brands seeded from products.');
+      }
     }
 
     // Seed 30 Days Analytics Dummy Data

@@ -1609,6 +1609,83 @@ app.get('/api/categories', async (req, res) => {
   }
 });
 
+// ==========================================
+// Motor Brand APIs
+// ==========================================
+app.get('/api/motor-brands', async (req, res) => {
+  try {
+    const [rows] = await pool.query(`
+      SELECT id, name, sort_order
+      FROM motor_brands
+      WHERE is_active = TRUE
+      ORDER BY sort_order ASC, name ASC
+    `);
+    res.json(rows);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: '서버 내부 오류' });
+  }
+});
+
+app.get('/api/admin/motor-brands', requireAdmin, async (req, res) => {
+  try {
+    const [rows] = await pool.query(`
+      SELECT id, name, sort_order, is_active, created_at, updated_at
+      FROM motor_brands
+      ORDER BY is_active DESC, sort_order ASC, name ASC
+    `);
+    res.json(rows);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: '서버 내부 오류' });
+  }
+});
+
+app.post('/api/admin/motor-brands', requireAdmin, async (req, res) => {
+  const { name } = req.body;
+  const normalizedName = normalizeBrand(name);
+  if (!normalizedName) {
+    return res.status(400).json({ message: '브랜드명을 입력해 주세요.' });
+  }
+
+  try {
+    const [existing] = await pool.query('SELECT * FROM motor_brands WHERE name = ?', [normalizedName]);
+    if (existing.length > 0) {
+      if (!existing[0].is_active) {
+        await pool.query('UPDATE motor_brands SET is_active = TRUE WHERE id = ?', [existing[0].id]);
+        return res.json({ success: true, message: '숨김 처리된 브랜드를 다시 노출했습니다.' });
+      }
+      return res.status(400).json({ message: '이미 존재하는 브랜드입니다.' });
+    }
+
+    const [maxOrderRows] = await pool.query('SELECT MAX(sort_order) AS max_val FROM motor_brands');
+    const nextOrder = (maxOrderRows[0].max_val || 0) + 1;
+    await pool.query(
+      'INSERT INTO motor_brands (name, sort_order, is_active) VALUES (?, ?, TRUE)',
+      [normalizedName, nextOrder]
+    );
+    res.status(201).json({ success: true, message: '브랜드가 추가되었습니다.' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: '서버 내부 오류' });
+  }
+});
+
+app.delete('/api/admin/motor-brands/:id', requireAdmin, async (req, res) => {
+  try {
+    const [existing] = await pool.query('SELECT * FROM motor_brands WHERE id = ?', [req.params.id]);
+    if (existing.length === 0) {
+      return res.status(404).json({ message: '브랜드를 찾을 수 없습니다.' });
+    }
+
+    await pool.query('UPDATE motor_brands SET is_active = FALSE WHERE id = ?', [req.params.id]);
+    res.json({ success: true, message: '브랜드가 숨김 처리되었습니다.' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: '서버 내부 오류' });
+  }
+});
+
 // Reorder Categories
 app.put('/api/categories/reorder', requireAdmin, async (req, res) => {
   const { categoryIds } = req.body; // Array of IDs in the desired order

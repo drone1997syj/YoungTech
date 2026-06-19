@@ -23,7 +23,8 @@ export default function ProductList() {
     addToCompare,
     compareList,
     products,
-    categories
+    categories,
+    motorBrands
   } = useShop();
 
   const [selectedBrand, setSelectedBrand] = useState('all');
@@ -38,17 +39,13 @@ export default function ProductList() {
     return category?.name || FALLBACK_CATEGORY_NAMES[categoryId] || categoryId;
   };
 
-  const motorBrands = useMemo(() => {
-    const brands = visibleProducts
-      .filter(product => product.category === 'motor')
-      .map(product => String(product.brand || '').trim())
-      .filter(Boolean);
-    return [...new Set(brands)].sort((a, b) => a.localeCompare(b, 'ko-KR'));
-  }, [visibleProducts]);
-
   const filteredProducts = visibleProducts.filter(product => {
     const matchesCategory = activeCategory === 'all' || product.category === activeCategory;
-    const matchesBrand = activeCategory !== 'motor' || selectedBrand === 'all' || product.brand === selectedBrand;
+    const productBrand = String(product.brand || '').trim();
+    const selectedBrandName = typeof selectedBrand === 'object'
+      ? String(selectedBrand?.name || '').trim()
+      : String(selectedBrand || '').trim();
+    const matchesBrand = activeCategory !== 'motor' || selectedBrandName === 'all' || productBrand === selectedBrandName;
     const query = searchQuery.trim().toLowerCase();
     const matchesSearch = !query ||
       product.name?.toLowerCase().includes(query) ||
@@ -104,12 +101,12 @@ export default function ProductList() {
                 <div className="brand-list">
                   {motorBrands.map(brand => (
                     <button
-                      key={brand}
+                      key={brand.id || brand.name || brand}
                       type="button"
-                      className={`brand-list-item ${selectedBrand === brand ? 'active' : ''}`}
-                      onClick={() => setSelectedBrand(brand)}
+                      className={`brand-list-item ${String(selectedBrand?.name || selectedBrand || '') === String(brand.name || brand) ? 'active' : ''}`}
+                      onClick={() => setSelectedBrand(brand.name || brand)}
                     >
-                      {brand}
+                      {brand.name || brand}
                     </button>
                   ))}
                 </div>

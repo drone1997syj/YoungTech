@@ -12,6 +12,7 @@ export default function AdminDashboard() {
 
     createProduct, updateProduct, updateProductActive, deleteProduct, products, fetchProducts,
     categories, createCategory, updateCategory, deleteCategory, reorderCategories, reorderProducts,
+    motorBrands, createMotorBrand, deleteMotorBrand, fetchMotorBrands,
     backendUrl
   } = useShop();
 
@@ -75,6 +76,8 @@ export default function AdminDashboard() {
   const [editingCatId, setEditingCatId] = useState(null);
   const [editingCatName, setEditingCatName] = useState('');
   const [localCategories, setLocalCategories] = useState([]);
+  const [newMotorBrandName, setNewMotorBrandName] = useState('');
+  const [motorBrandMessage, setMotorBrandMessage] = useState('');
 
   useEffect(() => {
     setLocalCategories(categories);
@@ -474,6 +477,7 @@ export default function AdminDashboard() {
     try {
       const statsData = await fetchAdminStats();
       setStats(statsData);
+      await fetchMotorBrands();
       const ordersData = await fetchAllOrders();
       setOrders(ordersData);
       
@@ -572,6 +576,36 @@ export default function AdminDashboard() {
     setFormError('');
     setPriceConfirmed(false);
     setShowProductModal(true);
+  };
+
+  const handleAddMotorBrand = async (e) => {
+    e.preventDefault();
+    const name = newMotorBrandName.trim();
+    if (!name) {
+      setMotorBrandMessage('브랜드명을 입력해 주세요.');
+      return;
+    }
+
+    const res = await createMotorBrand(name);
+    if (res.success) {
+      setNewMotorBrandName('');
+      setMotorBrandMessage('모터 브랜드가 추가되었습니다.');
+      await fetchMotorBrands();
+    } else {
+      setMotorBrandMessage(res.message || '브랜드 추가에 실패했습니다.');
+    }
+  };
+
+  const handleRemoveMotorBrand = async (brandId, brandName) => {
+    if (!window.confirm(`'${brandName}' 브랜드를 숨김 처리할까요?`)) return;
+
+    const res = await deleteMotorBrand(brandId);
+    if (res.success) {
+      setMotorBrandMessage('브랜드가 숨김 처리되었습니다.');
+      await fetchMotorBrands();
+    } else {
+      setMotorBrandMessage(res.message || '브랜드 삭제에 실패했습니다.');
+    }
   };
 
   const openEditModal = (p) => {
@@ -1055,6 +1089,60 @@ export default function AdminDashboard() {
                       </div>
                     </div>
 
+
+
+                    <div className="card p-4 flex flex-col gap-3 bg-white rounded-xl border">
+                      <div className="flex items-center justify-between gap-3 flex-wrap">
+                        <div>
+                          <h4 className="text-sm font-extrabold text-dark">?? ??? ??</h4>
+                          <p className="text-3xs text-light mt-1">?? ????? ??? ???? ??? ????? ?? ? ????.</p>
+                        </div>
+                        <form onSubmit={handleAddMotorBrand} className="flex items-center gap-2 flex-wrap">
+                          <input
+                            type="text"
+                            value={newMotorBrandName}
+                            onChange={(e) => setNewMotorBrandName(e.target.value)}
+                            placeholder="???? ??"
+                            className="form-input text-xs py-2 px-3 border rounded-lg bg-white"
+                            style={{ minWidth: '180px' }}
+                          />
+                          <button type="submit" className="btn btn-primary py-2 px-3 text-xs font-bold flex items-center gap-1">
+                            <Plus size={14} /> ??
+                          </button>
+                        </form>
+                      </div>
+
+                      {motorBrandMessage && (
+                        <div className="text-xs text-slate-500">{motorBrandMessage}</div>
+                      )}
+
+                      <div className="flex flex-wrap gap-2">
+                        {(motorBrands || []).map((brand) => {
+                          const brandId = brand.id || brand.name || brand;
+                          const brandName = brand.name || brand;
+                          return (
+                            <span
+                              key={brandId}
+                              className="inline-flex items-center gap-1 rounded-full bg-violet-50 text-violet-700 border border-violet-100 px-3 py-1 text-xs font-bold"
+                            >
+                              {brandName}
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveMotorBrand(brandId, brandName)}
+                                className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-white/70 text-violet-500 hover:bg-violet-100"
+                                aria-label={`${brandName} ???`}
+                                title="???"
+                              >
+                                ?
+                              </button>
+                            </span>
+                          );
+                        })}
+                        {(!motorBrands || motorBrands.length === 0) && (
+                          <div className="text-xs text-light">??? ?? ???? ????.</div>
+                        )}
+                      </div>
+                    </div>
                     {/* 필터 및 신규 등록 영역 */}
                     <div className="flex justify-between items-center gap-4 flex-wrap bg-white p-4 rounded-xl border">
                       <div className="flex items-center gap-4 flex-wrap">
