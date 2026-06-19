@@ -2527,13 +2527,18 @@ export default function AdminDashboard() {
             className="modal-content card p-6 max-w-lg w-full relative animate-scale-up"
             style={{ maxHeight: '85vh', overflowY: 'auto' }}
           >
-            <button onClick={() => setShowProductModal(false)} className="absolute top-4 right-4 text-light hover:text-dark">
-              <X size={18} />
-            </button>
-
-            <h3 className="font-extrabold text-dark text-sm border-b pb-2 mb-4">
-              {editingProduct ? '상품 정보 수정' : '신규 상품 등록'}
-            </h3>
+            <div className="flex items-start justify-between gap-3 mb-4">
+              <h3 className="font-extrabold text-dark text-sm border-b pb-2 mb-0 flex-1">
+                {editingProduct ? '?? ?? ??' : '?? ?? ??'}
+              </h3>
+              <button
+                onClick={() => setShowProductModal(false)}
+                className="modal-close-button text-light hover:text-dark"
+                aria-label="??"
+              >
+                <X size={18} />
+              </button>
+            </div>
 
             {formError && (
               <div className="alert-box alert-danger mb-4 text-xs font-semibold flex items-center gap-1">

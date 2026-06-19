@@ -715,6 +715,25 @@
   overflow-y: auto;
 }
 
+.modal-close-button {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: background-color 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+}
+
+.modal-close-button:hover {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+}
+
 /* Animate Classes */
 .animate-scale-up {
   animation: scaleUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
