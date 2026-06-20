@@ -2142,21 +2142,23 @@ export default function AdminDashboard() {
                                   </div>
                                   <div className="admin-category-node-meta">
                                     <span>하위 카테고리 {children.length}개</span>
-                                    <button
-                                      type="button"
-                                      className="admin-mini-action admin-inline-add-trigger"
-                                      onClick={() => {
-                                        setEditingCatId(null);
-                                        setEditingCatName('');
-                                        setEditingCatParentId('');
-                                        setNewCatName('');
-                                        setNewCatParentId(item.id);
-                                        setCatError('');
-                                        setCatSuccess('');
-                                      }}
-                                    >
-                                      하위 카테고리 추가
-                                    </button>
+                                    {depth === 0 && (
+                                      <button
+                                        type="button"
+                                        className="admin-mini-action admin-inline-add-trigger"
+                                        onClick={() => {
+                                          setEditingCatId(null);
+                                          setEditingCatName('');
+                                          setEditingCatParentId('');
+                                          setNewCatName('');
+                                          setNewCatParentId(item.id);
+                                          setCatError('');
+                                          setCatSuccess('');
+                                        }}
+                                      >
+                                        하위 카테고리 추가
+                                      </button>
+                                    )}
                                   </div>
                                 </div>
                                 <div className="admin-category-node-actions">
