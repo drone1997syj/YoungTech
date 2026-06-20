@@ -1407,15 +1407,15 @@ export default function AdminDashboard() {
                     {/* 스마트스토어 스타일 상품 현황 대시보드 */}
                     <div className="grid grid-cols-3 gap-4">
                       <div className="card p-4 flex flex-col justify-between" style={{ backgroundColor: '#f8fafc', borderLeft: '4px solid #8b5cf6' }}>
-                        <span className="text-2xs text-light font-bold">?? ??</span>
+                        <span className="text-2xs text-light font-bold">총 상품</span>
                         <span className="text-lg font-black text-dark mt-1">{products.length} <span className="text-xs font-normal text-light">?</span></span>
                       </div>
                       <div className="card p-4 flex flex-col justify-between" style={{ backgroundColor: '#f8fafc', borderLeft: '4px solid #10b981' }}>
-                        <span className="text-2xs text-light font-bold">?? ?</span>
+                        <span className="text-2xs text-light font-bold">판매중 상품</span>
                         <span className="text-lg font-black text-green-600 mt-1">{products.filter(p => p.stock > 0).length} <span className="text-xs font-normal text-light">?</span></span>
                       </div>
                       <div className="card p-4 flex flex-col justify-between" style={{ backgroundColor: '#f8fafc', borderLeft: '4px solid #f59e0b' }}>
-                        <span className="text-2xs text-light font-bold">?? ??/??</span>
+                        <span className="text-2xs text-light font-bold">품절 상품</span>
                         <span className="text-lg font-black text-amber-600 mt-1">{products.filter(p => p.stock === 0).length} <span className="text-xs font-normal text-light">?</span></span>
                       </div>
                     </div>
@@ -2056,8 +2056,8 @@ export default function AdminDashboard() {
                 <div className="tab-categories flex flex-col gap-6 animate-fade-in">
                   <div className="flex items-end justify-between gap-4 flex-wrap">
                     <div>
-                      <h3 className="font-extrabold text-dark text-lg">?? ??</h3>
-                      <p className="text-xs text-light mt-1">?? ????? ?? ????? ??, ??, ???? ??? ?????.</p>
+                      <h3 className="font-extrabold text-dark text-lg">카테고리 관리</h3>
+                      <p className="text-xs text-light mt-1">상위/하위 카테고리를 추가, 수정, 정렬하며 구조를 관리합니다.</p>
                     </div>
                   </div>
 
@@ -2079,8 +2079,8 @@ export default function AdminDashboard() {
                   <div className="card p-5">
                     <div className="flex items-center justify-between gap-3 mb-4">
                       <div>
-                        <h4 className="font-bold text-dark text-sm">?? ??</h4>
-                        <p className="text-xs text-light mt-1">???? ?? ?? ??? ??? ?? ? ????.</p>
+                        <h4 className="font-bold text-dark text-sm">전체 카테고리</h4>
+                        <p className="text-xs text-light mt-1">드래그로 순서를 바꾸고 하위 카테고리를 관리할 수 있습니다.</p>
                       </div>
                       <span className="text-2xs text-light font-bold">? {localCategories.length}?</span>
                     </div>
@@ -2110,7 +2110,7 @@ export default function AdminDashboard() {
                                 onDrop={() => handleCategoryDrop(item.id)}
                                 onDragEnd={handleCategoryDragEnd}
                               >
-                                <button type="button" className="admin-category-drag-handle" aria-label="?? ?? ??">
+                                <button type="button" className="admin-category-drag-handle" aria-label="카테고리 순서 이동">
                                   <GripVertical size={14} />
                                 </button>
                                 <div className="admin-category-node-main">
@@ -2123,7 +2123,7 @@ export default function AdminDashboard() {
                                           e.stopPropagation();
                                           toggleCategoryExpanded(item.id);
                                         }}
-                                        aria-label={isExpanded ? '?? ???? ??' : '?? ???? ???'}
+                                        aria-label={isExpanded ? '하위 카테고리 접기' : '하위 카테고리 펼치기'}
                                       >
                                         <ChevronRight size={13} />
                                       </button>
@@ -2142,7 +2142,7 @@ export default function AdminDashboard() {
                                     </button>
                                   </div>
                                   <div className="admin-category-node-meta">
-                                    <span>?? ???? {children.length}?</span>
+                                    <span>하위 카테고리 {children.length}개</span>
                                     <button
                                       type="button"
                                       className="admin-mini-action admin-inline-add-trigger"
@@ -2156,7 +2156,7 @@ export default function AdminDashboard() {
                                         setCatSuccess('');
                                       }}
                                     >
-                                      ?? ???? ??
+                                      하위 카테고리 추가
                                     </button>
                                   </div>
                                 </div>
@@ -2174,14 +2174,14 @@ export default function AdminDashboard() {
                                     }}
                                     className="admin-mini-action"
                                   >
-                                    ??
+                                    수정
                                   </button>
                                   <button
                                     type="button"
                                     onClick={() => handleDeleteCategoryDraft(item)}
                                     className="admin-mini-action danger"
                                   >
-                                    ??
+                                    삭제
                                   </button>
                                 </div>
                               </div>
@@ -2190,13 +2190,13 @@ export default function AdminDashboard() {
                                 <div className="admin-category-inline-add" style={{ paddingLeft: `${depth * 18 + 34}px` }}>
                                   <div className="admin-category-inline-add-row">
                                     <div className="admin-category-inline-add-field">
-                                      <label className="form-label text-2xs font-bold mb-1">?? ?????</label>
+                                      <label className="form-label text-2xs font-bold mb-1">하위 카테고리명</label>
                                       <input
                                         type="text"
                                         value={newCatName}
                                         onChange={(e) => setNewCatName(e.target.value)}
                                         className="form-input text-xs"
-                                        placeholder="?: ????"
+                                        placeholder="예: 감속기"
                                       />
                                     </div>
                                     <div className="admin-category-inline-add-actions">
@@ -2205,14 +2205,14 @@ export default function AdminDashboard() {
                                         onClick={handleAddCategoryDraft}
                                         className="btn btn-primary py-2 px-4 text-xs font-bold"
                                       >
-                                        ??
+                                        추가
                                       </button>
                                       <button
                                         type="button"
                                         onClick={cancelCategoryInlineAdd}
                                         className="btn btn-secondary py-2 px-4 text-xs font-bold"
                                       >
-                                        ??
+                                        취소
                                       </button>
                                     </div>
                                   </div>
@@ -2223,7 +2223,7 @@ export default function AdminDashboard() {
                                 <div className="admin-category-edit-panel" style={{ paddingLeft: `${depth * 18 + 34}px` }}>
                                   <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
                                     <div>
-                                      <label className="form-label text-2xs font-bold mb-1">???</label>
+                                      <label className="form-label text-2xs font-bold mb-1">카테고리명</label>
                                       <input
                                         type="text"
                                         value={editingCatName}
@@ -2232,13 +2232,13 @@ export default function AdminDashboard() {
                                       />
                                     </div>
                                     <div>
-                                      <label className="form-label text-2xs font-bold mb-1">?? ??</label>
+                                      <label className="form-label text-2xs font-bold mb-1">상위 카테고리</label>
                                       <select
                                         value={editingCatParentId}
                                         onChange={(e) => setEditingCatParentId(e.target.value)}
                                         className="form-select text-xs"
                                       >
-                                        <option value="">??? ??</option>
+                                        <option value="">상위 카테고리 없음</option>
                                         {parentCategoryOptions.filter((cat) => !blockedParents.has(cat.id)).map((cat) => (
                                           <option key={cat.id} value={cat.id}>{cat.name}</option>
                                         ))}
@@ -2250,7 +2250,7 @@ export default function AdminDashboard() {
                                         onClick={() => handleUpdateCategoryDraft(item.id)}
                                         className="btn btn-primary py-2 px-3 text-xs font-bold"
                                       >
-                                        ??
+                                        저장
                                       </button>
                                       <button
                                         type="button"
@@ -2261,7 +2261,7 @@ export default function AdminDashboard() {
                                         }}
                                         className="btn btn-secondary py-2 px-3 text-xs font-bold"
                                       >
-                                        ??
+                                        취소
                                       </button>
                                     </div>
                                   </div>
@@ -2282,7 +2282,7 @@ export default function AdminDashboard() {
 
                       {categoryTree.length === 0 && (
                         <div className="admin-empty-state">
-                          ??? ??? ????.
+                          등록된 카테고리가 없습니다.
                         </div>
                       )}
                     </div>
@@ -2294,7 +2294,7 @@ export default function AdminDashboard() {
                         disabled={!categoryDirty || savingCategories}
                         className={`btn btn-primary py-2 px-10 min-w-[200px] text-xs font-bold ${!categoryDirty ? 'opacity-50 cursor-not-allowed' : ''}`}
                       >
-                        {savingCategories ? '?? ?...' : '???? ??'}
+                        {savingCategories ? '저장 중...' : '변경 사항 저장'}
                       </button>
                     </div>
                   </div>
@@ -2550,12 +2550,12 @@ export default function AdminDashboard() {
           >
             <div className="flex items-start justify-between gap-3 mb-4">
               <h3 className="font-extrabold text-dark text-sm border-b pb-2 mb-0 flex-1">
-                {editingProduct ? '?? ?? ??' : '?? ?? ??'}
+                {editingProduct ? '상품 수정' : '상품 추가'}
               </h3>
               <button
                 onClick={() => setShowProductModal(false)}
                 className="modal-close-button text-light hover:text-dark"
-                aria-label="??"
+                aria-label="닫기"
               >
                 <X size={18} />
               </button>

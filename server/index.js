@@ -67,7 +67,7 @@ const upload = multer({
     if (extname && mimetype) {
       return cb(null, true);
     }
-    cb(new Error('이미지 파일만 업로드 가능합니다.'));
+    cb(new Error('이미지 파일만 업로드할 수 있습니다.'));
   }
 });
 
@@ -148,7 +148,7 @@ const getLoginLimitForRole = (role) => (role === 'admin' ? 5 : 7);
 const createUnlockCode = () => String(Math.floor(100000 + Math.random() * 900000));
 
 const buildLockMessage = (limit) => (
-  `로그인 실패가 ${limit}회 이상 발생해 계정 보호를 위해 로그인이 제한되었습니다. 가입된 이메일 인증 후 다시 이용해 주세요.`
+  `로그인 실패가 ${limit}회 이상 발생해 계정 보호를 위해 로그인이 제한되었습니다. 가입한 이메일로 인증 후 다시 이용해 주세요.`
 );
 
 const validatePasswordPolicy = (password, context = {}) => {
@@ -160,16 +160,16 @@ const validatePasswordPolicy = (password, context = {}) => {
     return '비밀번호에는 공백을 사용할 수 없습니다.';
   }
   if (!/[A-Za-z]/.test(value) || !/\d/.test(value) || !/[!@#$%^&*()_\-+=[\]{};':"\\|,.<>/?`~]/.test(value)) {
-    return '비밀번호는 영문, 숫자, 특수문자를 모두 포함해야 합니다.';
+    return '비밀번호에는 영문, 숫자, 특수문자를 모두 포함해야 합니다.';
   }
   const lowered = value.toLowerCase();
   const emailId = String(context.email || '').split('@')[0]?.toLowerCase();
   const name = String(context.name || '').toLowerCase();
   if (emailId && emailId.length >= 4 && lowered.includes(emailId)) {
-    return '비밀번호에 이메일 아이디와 같은 문자열을 포함할 수 없습니다.';
+    return '비밀번호에 이메일 아이디와 같은 문자를 포함할 수 없습니다.';
   }
   if (name && name.length >= 2 && lowered.includes(name)) {
-    return '비밀번호에 이름과 같은 문자열을 포함할 수 없습니다.';
+    return '비밀번호에 이름과 같은 문자를 포함할 수 없습니다.';
   }
   return null;
 };
@@ -1687,10 +1687,10 @@ app.delete('/api/admin/motor-brands/:id', requireAdmin, async (req, res) => {
     }
 
     await pool.query('UPDATE motor_brands SET is_active = FALSE WHERE id = ?', [req.params.id]);
-    res.json({ success: true, message: '브랜드가 숨김 처리되었습니다.' });
+    res.json({ success: true, message: '브랜드가 비활성화되었습니다.' });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ message: '서버 내부 오류' });
+    res.status(500).json({ message: '서버 오류가 발생했습니다.' });
   }
 });
 
@@ -1708,7 +1708,7 @@ app.put('/api/categories/reorder', requireAdmin, async (req, res) => {
       : null;
 
   if (!Array.isArray(reorderItems)) {
-    return res.status(400).json({ message: '??? ???? ?? ?????.' });
+    return res.status(400).json({ message: '정렬할 카테고리 정보가 올바르지 않습니다.' });
   }
 
   const connection = await pool.getConnection();
@@ -1721,11 +1721,11 @@ app.put('/api/categories/reorder', requireAdmin, async (req, res) => {
       );
     }
     await connection.commit();
-    res.json({ success: true, message: '???? ??? ?????????.' });
+    res.json({ success: true, message: '카테고리 순서가 저장되었습니다.' });
   } catch (error) {
     await connection.rollback();
     console.error(error);
-    res.status(500).json({ message: '?? ??? ???? ?? ??? ??????.' });
+    res.status(500).json({ message: '카테고리 정렬 중 오류가 발생했습니다.' });
   } finally {
     connection.release();
   }
@@ -1734,19 +1734,19 @@ app.put('/api/categories/reorder', requireAdmin, async (req, res) => {
 app.post('/api/categories', requireAdmin, async (req, res) => {
   const { id, name, parent_id, parentId } = req.body;
   if (!id || !name) {
-    return res.status(400).json({ message: '???? ID? ??? ?? ??? ???.' });
+    return res.status(400).json({ message: '카테고리 ID와 이름은 필수입니다.' });
   }
   try {
     const [existing] = await pool.query('SELECT * FROM categories WHERE id = ?', [id]);
     if (existing.length > 0) {
-      return res.status(400).json({ message: '?? ???? ???? ID???.' });
+      return res.status(400).json({ message: '이미 존재하는 카테고리 ID입니다.' });
     }
 
     const normalizedParentId = normalizeCategoryParentId(parent_id ?? parentId);
     if (normalizedParentId) {
       const [parentRows] = await pool.query('SELECT id FROM categories WHERE id = ?', [normalizedParentId]);
       if (parentRows.length === 0) {
-        return res.status(400).json({ message: '??? ?? ????? ?? ? ????.' });
+        return res.status(400).json({ message: '부모 카테고리가 존재하지 않습니다.' });
       }
     }
 
@@ -1760,10 +1760,10 @@ app.post('/api/categories', requireAdmin, async (req, res) => {
       'INSERT INTO categories (id, name, parent_id, sort_order) VALUES (?, ?, ?, ?)',
       [id, name, normalizedParentId, nextOrder]
     );
-    res.status(201).json({ success: true, message: '????? ???????.' });
+    res.status(201).json({ success: true, message: '카테고리가 추가되었습니다.' });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ message: '?? ??? ??????.' });
+    res.status(500).json({ message: '카테고리 추가 중 오류가 발생했습니다.' });
   }
 });
 
@@ -1772,7 +1772,7 @@ app.delete('/api/categories/:id', requireAdmin, async (req, res) => {
     const [childCats] = await pool.query('SELECT COUNT(*) as count FROM categories WHERE COALESCE(parent_id, "") = ?', [req.params.id]);
     if (childCats[0].count > 0) {
       return res.status(400).json({
-        message: '?? ????? ?? ????? ??? ? ????.'
+        message: '하위 카테고리가 있어 삭제할 수 없습니다.'
       });
     }
 
@@ -2063,7 +2063,7 @@ function mapCsvProducts(buffer) {
 app.post('/api/products', requireAdmin, async (req, res) => {
   const { id, name, category, price, image, description, specs, stock, brand, is_active } = req.body;
   if (!id || !name || !category || !price) {
-    return res.status(400).json({ message: '필수 상품 정보(ID, 상품명, 카테고리, 가격)를 입력해주세요.' });
+    return res.status(400).json({ message: '필수 상품 정보(ID, 상품명, 카테고리, 가격)를 입력해 주세요.' });
   }
 
   const priceWarning = await validateProductPrice(Number(price), category);
@@ -2076,7 +2076,7 @@ app.post('/api/products', requireAdmin, async (req, res) => {
     if (existing.length > 0) {
       if (existing[0].is_deleted) {
         return res.status(409).json({
-          message: '삭제 처리된 상품 ID입니다. 주문 이력 보호를 위해 같은 ID는 재사용할 수 없습니다. 새 상품 ID를 사용해 주세요.'
+          message: '삭제 처리된 상품 ID입니다. 주문 보존을 위해 같은 ID를 다시 사용할 수 없습니다. 새 상품 ID를 사용해 주세요.'
         });
       }
       return res.status(400).json({ message: '이미 존재하는 상품 ID입니다.' });
@@ -2090,7 +2090,7 @@ app.post('/api/products', requireAdmin, async (req, res) => {
     res.status(201).json({ message: '상품이 성공적으로 등록되었습니다.' });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ message: '서버 내부 오류' });
+    res.status(500).json({ message: '서버 오류가 발생했습니다.' });
   }
 });
 
@@ -2117,7 +2117,7 @@ app.put('/api/products/:id', requireAdmin, async (req, res) => {
     res.json({ message: '상품 정보가 수정되었습니다.' });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ message: '서버 내부 오류' });
+    res.status(500).json({ message: '서버 오류가 발생했습니다.' });
   }
 });
 
@@ -2186,10 +2186,10 @@ app.delete('/api/products/:id', requireAdmin, async (req, res) => {
     }
 
     await pool.query('UPDATE products SET is_deleted = TRUE, deleted_at = NOW(), stock = 0 WHERE id = ?', [req.params.id]);
-    res.json({ message: '상품이 삭제 처리되었습니다. 주문 이력 보호를 위해 실제 데이터는 보존됩니다.' });
+    res.json({ message: '상품이 삭제 처리되었습니다. 주문 보존을 위해 삭제 데이터는 유지됩니다.' });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ message: '서버 내부 오류' });
+    res.status(500).json({ message: '서버 오류가 발생했습니다.' });
   }
 });
 
@@ -2197,14 +2197,14 @@ app.delete('/api/products/:id', requireAdmin, async (req, res) => {
 app.post('/api/products/batch-delete', requireAdmin, async (req, res) => {
   const { ids } = req.body;
   if (!ids || !Array.isArray(ids) || ids.length === 0) {
-    return res.status(400).json({ message: '삭제할 상품 ID 리스트가 필요합니다.' });
+    return res.status(400).json({ message: '삭제할 상품 ID 목록이 필요합니다.' });
   }
   try {
     await pool.query('UPDATE products SET is_deleted = TRUE, deleted_at = NOW(), stock = 0 WHERE id IN (?) AND is_deleted = FALSE', [ids]);
-    res.json({ success: true, message: `${ids.length}개의 상품이 삭제 처리되었습니다. 주문 이력 보호를 위해 실제 데이터는 보존됩니다.` });
+    res.json({ success: true, message: `${ids.length}개의 상품이 삭제 처리되었습니다. 주문 보존을 위해 삭제 데이터는 유지됩니다.` });
   } catch (error) {
     console.error('Batch Delete Error:', error);
-    res.status(500).json({ message: '상품 일괄 삭제 중 서버 내부 오류가 발생했습니다.' });
+    res.status(500).json({ message: '상품 일괄 삭제 중 서버 오류가 발생했습니다.' });
   }
 });
 
@@ -2212,14 +2212,14 @@ app.post('/api/products/batch-delete', requireAdmin, async (req, res) => {
 app.post('/api/products/batch-out-of-stock', requireAdmin, async (req, res) => {
   const { ids } = req.body;
   if (!ids || !Array.isArray(ids) || ids.length === 0) {
-    return res.status(400).json({ message: '품절 처리할 상품 ID 리스트가 필요합니다.' });
+    return res.status(400).json({ message: '품절 처리할 상품 ID 목록이 필요합니다.' });
   }
   try {
     await pool.query('UPDATE products SET stock = 0 WHERE id IN (?) AND is_deleted = FALSE', [ids]);
     res.json({ success: true, message: `${ids.length}개의 상품이 품절 처리되었습니다.` });
   } catch (error) {
     console.error('Batch Out-Of-Stock Error:', error);
-    res.status(500).json({ message: '상품 일괄 품절 처리 중 서버 내부 오류가 발생했습니다.' });
+    res.status(500).json({ message: '상품 일괄 품절 처리 중 서버 오류가 발생했습니다.' });
   }
 });
 
@@ -2295,11 +2295,11 @@ app.post('/api/orders', authenticateToken, async (req, res) => {
     `, [todayString, total_amount]);
 
     await connection.commit();
-    res.status(201).json({ message: '주문이 접수되었습니다.', orderId });
+    res.json({ message: '주문이 접수되었습니다.', orderId });
   } catch (error) {
     await connection.rollback();
     console.error(error);
-    res.status(500).json({ message: '서버 내부 오류' });
+    res.status(500).json({ message: '서버 오류가 발생했습니다.' });
   } finally {
     connection.release();
   }
