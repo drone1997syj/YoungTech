@@ -413,16 +413,13 @@ export default function AdminDashboard() {
       .replace(/&/g, 'and')
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-+|-+$/g, '');
-    const fallbackId = `item-${Date.now().toString(36)}`;
-    const seedId = baseId || fallbackId;
     const usedIds = new Set(localCategories.map((cat) => cat.id));
-    if (!usedIds.has(seedId)) return seedId;
-
-    let suffix = 2;
-    while (usedIds.has(`${seedId}-${suffix}`)) {
-      suffix += 1;
+    const slug = baseId || 'cat';
+    let candidate = `${slug}-${Math.random().toString(36).slice(2, 6)}`;
+    while (usedIds.has(candidate)) {
+      candidate = `${slug}-${Math.random().toString(36).slice(2, 6)}`;
     }
-    return `${seedId}-${suffix}`;
+    return candidate;
   };
 
   const handleAddCategoryDraft = () => {
