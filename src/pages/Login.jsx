@@ -21,7 +21,6 @@ export default function Login() {
   const [foundEmails, setFoundEmails] = useState(null);
   const [findIdMessage, setFindIdMessage] = useState('');
   const [resetPwEmail, setResetPwEmail] = useState('');
-  const [resetPwName, setResetPwName] = useState('');
   const [tempPasswordResult, setTempPasswordResult] = useState('');
   const [linkRequest, setLinkRequest] = useState(null);
   const [unlockInfo, setUnlockInfo] = useState(null);
@@ -204,12 +203,12 @@ export default function Login() {
 
   const handleResetPassword = async (e) => {
     e.preventDefault();
-    if (!resetPwEmail.trim() || !resetPwName.trim()) return;
+    if (!resetPwEmail.trim()) return;
     try {
       const res = await fetch(`${backendUrl}/api/auth/reset-password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: resetPwEmail, name: resetPwName })
+        body: JSON.stringify({ email: resetPwEmail })
       });
       const data = await res.json();
       if (res.ok) {
@@ -349,7 +348,7 @@ export default function Login() {
           </button>
           <span className="text-slate-300">|</span>
           <button 
-            onClick={() => { setShowResetPwModal(true); setTempPasswordResult(''); setResetPwEmail(''); setResetPwName(''); }} 
+            onClick={() => { setShowResetPwModal(true); setTempPasswordResult(''); setResetPwEmail(''); }} 
             className="hover:text-primary transition-colors underline font-semibold"
             style={{ background: 'none', border: 'none', cursor: 'pointer' }}
           >
@@ -503,7 +502,7 @@ export default function Login() {
         <div className="recovery-modal" onClick={() => setShowResetPwModal(false)}>
           <div className="recovery-container animate-fade-in" onClick={(e) => e.stopPropagation()}>
             <div className="recovery-header">
-              <h3>임시 비밀번호 발급</h3>
+              <h3>???? ??</h3>
               <button onClick={() => setShowResetPwModal(false)} className="text-slate-400 hover:text-slate-600 transition-colors">
                 <X size={18} />
               </button>
@@ -511,43 +510,32 @@ export default function Login() {
             <form onSubmit={handleResetPassword}>
               <div className="recovery-body">
                 <div className="recovery-input-group">
-                  <label className="recovery-label">이메일 계정 (아이디)</label>
-                  <input 
-                    type="email" 
-                    value={resetPwEmail} 
-                    onChange={(e) => setResetPwEmail(e.target.value)} 
-                    className="recovery-input" 
-                    placeholder="example@youngtech.com" 
-                    required 
+                  <label className="recovery-label">??? ??</label>
+                  <input
+                    type="email"
+                    value={resetPwEmail}
+                    onChange={(e) => setResetPwEmail(e.target.value)}
+                    className="recovery-input"
+                    placeholder="example@youngtech.com"
+                    required
                     autoFocus
-                  />
-                </div>
-                <div className="recovery-input-group">
-                  <label className="recovery-label">가입자 이름</label>
-                  <input 
-                    type="text" 
-                    value={resetPwName} 
-                    onChange={(e) => setResetPwName(e.target.value)} 
-                    className="recovery-input" 
-                    placeholder="가입 시 입력했던 이름" 
-                    required 
                   />
                 </div>
 
                 {tempPasswordResult && (
                   <div className="result-box mt-2" style={{ backgroundColor: '#f0fdf4', borderColor: '#bbf7d0' }}>
-                    <span className="font-bold text-green-800">임시 비밀번호가 안전하게 발급되었습니다.</span>
-                    <span className="text-3xs text-slate-500">인증메일 발송 시뮬레이션 동작 완료</span>
+                    <span className="font-bold text-green-800">?? ????? ???????.</span>
+                    <span className="text-3xs text-slate-500">?? ?? ??? ???? ?????.</span>
                     <div className="p-3 bg-white border border-green-200 rounded mt-2 text-center text-base font-black text-green-700 tracking-wider">
                       {tempPasswordResult}
                     </div>
-                    <span className="text-3xs text-slate-500 text-center mt-1">로그인 후 즉시 내정보 수정에서 비밀번호를 변경하시기 바랍니다.</span>
+                    <span className="text-3xs text-slate-500 text-center mt-1">??? ? ??????? ????? ??? ???.</span>
                   </div>
                 )}
               </div>
               <div className="recovery-footer">
-                <button type="button" onClick={() => setShowResetPwModal(false)} className="btn-recovery-cancel">닫기</button>
-                <button type="submit" className="btn-recovery-submit">임시 비밀번호 발급</button>
+                <button type="button" onClick={() => setShowResetPwModal(false)} className="btn-recovery-cancel">??</button>
+                <button type="submit" className="btn-recovery-submit">?? ???? ??</button>
               </div>
             </form>
           </div>

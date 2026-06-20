@@ -608,13 +608,13 @@ app.post('/api/auth/find-id', async (req, res) => {
 
 // 비밀번호 찾기(임시 비밀번호 생성) API
 app.post('/api/auth/reset-password', async (req, res) => {
-  const { email, name } = req.body;
-  if (!email || !name) {
-    return res.status(400).json({ message: '이메일과 이름을 모두 입력해 주세요.' });
+  const { email } = req.body;
+  if (!email) {
+    return res.status(400).json({ message: '???? ??? ???.' });
   }
 
   try {
-    const [rows] = await pool.query('SELECT id FROM users WHERE email = ? AND name = ?', [email.trim(), name.trim()]);
+    const [rows] = await pool.query('SELECT id FROM users WHERE email = ?', [email.trim()]);
     if (rows.length === 0) {
       return res.status(404).json({ message: '입력하신 정보와 일치하는 가입 정보가 없습니다.' });
     }
