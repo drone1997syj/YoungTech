@@ -249,6 +249,11 @@
   text-align: left;
 }
 
+.recovery-container-reset {
+  width: 560px;
+  max-width: min(94vw, 560px);
+}
+
 .recovery-header {
   background-color: #ffffff;
   padding: 18px 24px;
@@ -272,10 +277,60 @@
   gap: 16px;
 }
 
+.reset-password-body {
+  gap: 14px;
+}
+
+.reset-password-hero {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.95rem 1rem;
+  border: 1px solid #ddd6fe;
+  border-radius: 16px;
+  background:
+    linear-gradient(135deg, rgba(124, 58, 237, 0.08), rgba(255, 255, 255, 0.96)),
+    #ffffff;
+}
+
+.reset-password-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, rgba(124, 58, 237, 0.18), rgba(16, 185, 129, 0.18));
+  color: #6d28d9;
+  flex-shrink: 0;
+}
+
+.reset-password-hero b {
+  display: block;
+  color: #1e293b;
+  font-size: 0.92rem;
+  font-weight: 900;
+  margin-bottom: 0.2rem;
+}
+
+.reset-password-hero p {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.74rem;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
 .recovery-input-group {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+.recovery-input-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
 }
 
 .recovery-label {
@@ -298,6 +353,93 @@
 .recovery-input:focus {
   border-color: #03cf5d;
   box-shadow: 0 0 0 3px rgba(3, 207, 93, 0.12);
+}
+
+.reset-password-email-card {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.78rem 0.9rem;
+  border: 1px solid #c4b5fd;
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(124, 58, 237, 0.08), rgba(255, 255, 255, 0.96));
+  color: #4c1d95;
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.reset-password-email-card b {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 0.82rem;
+  color: #4c1d95;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+.reset-password-code-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.6rem;
+  align-items: end;
+}
+
+.reset-password-code-btn {
+  height: 42px;
+  padding: 0 0.95rem;
+  border-radius: 12px;
+  border: 1px solid #c4b5fd;
+  background: linear-gradient(135deg, rgba(124, 58, 237, 0.08), #ffffff);
+  color: #6d28d9;
+  font-size: 0.78rem;
+  font-weight: 900;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.reset-password-code-btn:hover {
+  border-color: #7c3aed;
+  background: #f5f3ff;
+}
+
+.reset-password-code-btn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.password-field-wrapper {
+  position: relative;
+}
+
+.password-recovery-input {
+  padding-right: 2.8rem;
+}
+
+.recovery-password-toggle {
+  right: 10px;
+  color: #94a3b8;
+}
+
+.recovery-password-toggle:hover {
+  color: #6d28d9;
+}
+
+.reset-password-note {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.75rem 0.9rem;
+  border: 1px dashed #cbd5e1;
+  border-radius: 12px;
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.reset-password-note b {
+  color: #6d28d9;
+  font-weight: 900;
 }
 
 .recovery-footer {
@@ -359,6 +501,18 @@
     linear-gradient(135deg, rgba(124, 58, 237, 0.08), rgba(236, 253, 245, 0.55)),
     #ffffff;
   box-shadow: 0 10px 22px rgba(88, 28, 135, 0.08);
+}
+
+.result-box-error {
+  border-color: #fecdd3;
+  background: #fff1f2;
+  color: #be123c;
+}
+
+.result-box-info {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
 }
 
 .result-id-title {
@@ -828,6 +982,21 @@
 .social-link-submit:disabled {
   opacity: 0.65;
   cursor: not-allowed;
+}
+
+@media (max-width: 640px) {
+  .recovery-container-reset {
+    width: 94vw;
+  }
+
+  .reset-password-code-row,
+  .recovery-input-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .reset-password-code-btn {
+    width: 100%;
+  }
 }
  
 .auth-icon {

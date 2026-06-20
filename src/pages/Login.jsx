@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useShop } from '../context/ShopContext';
 import { loadGoogleIdentityScript, requestGoogleAccessToken } from '../utils/googleAuth';
-import { LogIn, Key, UserPlus, ShieldAlert, X, Phone, MailCheck, ShieldCheck } from 'lucide-react';
+import { LogIn, Key, UserPlus, ShieldAlert, X, Phone, MailCheck, ShieldCheck, Eye, EyeOff } from 'lucide-react';
 import SocialAccountLinkModal from '../components/SocialAccountLinkModal';
 import './Auth.css';
 
@@ -21,7 +21,18 @@ export default function Login() {
   const [foundEmails, setFoundEmails] = useState(null);
   const [findIdMessage, setFindIdMessage] = useState('');
   const [resetPwEmail, setResetPwEmail] = useState('');
-  const [tempPasswordResult, setTempPasswordResult] = useState('');
+  const [resetStep, setResetStep] = useState('email');
+  const [resetVerificationId, setResetVerificationId] = useState('');
+  const [resetCode, setResetCode] = useState('');
+  const [resetNewPassword, setResetNewPassword] = useState('');
+  const [resetNewPasswordConfirm, setResetNewPasswordConfirm] = useState('');
+  const [resetMaskedEmail, setResetMaskedEmail] = useState('');
+  const [resetDevCode, setResetDevCode] = useState('');
+  const [resetMessage, setResetMessage] = useState('');
+  const [resetError, setResetError] = useState('');
+  const [resetSubmitting, setResetSubmitting] = useState(false);
+  const [showResetPassword, setShowResetPassword] = useState(false);
+  const [showResetPasswordConfirm, setShowResetPasswordConfirm] = useState(false);
   const [linkRequest, setLinkRequest] = useState(null);
   const [unlockInfo, setUnlockInfo] = useState(null);
   const [unlockCode, setUnlockCode] = useState('');
@@ -201,25 +212,128 @@ export default function Login() {
     }
   };
 
-  const handleResetPassword = async (e) => {
+  const handleRequestResetCode = async (e) => {
     e.preventDefault();
-    if (!resetPwEmail.trim()) return;
+
+    const emailValue = resetPwEmail.trim();
+    if (!emailValue) {
+      setResetError('???? ??? ???.');
+      return;
+    }
+
+    setResetSubmitting(true);
+    setResetError('');
+    setResetMessage('');
+
     try {
-      const res = await fetch(`${backendUrl}/api/auth/reset-password`, {
+      const res = await fetch(`${backendUrl}/api/auth/request-password-reset-code`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: resetPwEmail })
+        body: JSON.stringify({ email: emailValue })
       });
       const data = await res.json();
-      if (res.ok) {
-        setTempPasswordResult(data.tempPassword);
-      } else {
-        alert(data.message || '일치하는 사용자 정보를 찾을 수 없습니다.');
+
+      if (!res.ok) {
+        setResetError(data.message || '???? ??? ??????.');
+        return;
       }
+
+      setResetStep('verify');
+      setResetVerificationId(data.verificationId || '');
+      setResetMaskedEmail(data.maskedEmail || emailValue);
+      setResetDevCode(data.devVerificationCode || '');
+      setResetMessage(data.message || '???? ???? ????? ?????.');
+      setResetCode('');
+      setResetNewPassword('');
+      setResetNewPasswordConfirm('');
     } catch (err) {
       console.error(err);
-      alert('오류가 발생했습니다.');
+      setResetError('?? ??? ??????.');
+    } finally {
+      setResetSubmitting(false);
     }
+  };
+
+  const handleVerifyResetCode = async (e) => {
+    e.preventDefault();
+
+    const normalizedCode = resetCode.replace(/\D/g, '');
+    if (normalizedCode.length !== 6) {
+      setResetError('???? 6??? ??? ???.');
+      return;
+    }
+    if (!resetNewPassword || !resetNewPasswordConfirm) {
+      setResetError('? ????? ??? ???.');
+      return;
+    }
+    if (resetNewPassword !== resetNewPasswordConfirm) {
+      setResetError('? ????? ???? ????.');
+      return;
+    }
+
+    setResetSubmitting(true);
+    setResetError('');
+    setResetMessage('');
+
+    try {
+      const res = await fetch(`${backendUrl}/api/auth/verify-password-reset-code`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          verificationId: resetVerificationId,
+          code: normalizedCode,
+          newPassword: resetNewPassword
+        })
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        setResetError(data.message || '???? ??? ??????.');
+        return;
+      }
+
+      setResetMessage(data.message || '????? ???????.');
+      setResetStep('done');
+      setResetCode('');
+      setResetNewPassword('');
+      setResetNewPasswordConfirm('');
+    } catch (err) {
+      console.error(err);
+      setResetError('?? ??? ??????.');
+    } finally {
+      setResetSubmitting(false);
+    }
+  };
+
+  const openResetPasswordModal = () => {
+    setShowResetPwModal(true);
+    setResetStep('email');
+    setResetVerificationId('');
+    setResetCode('');
+    setResetNewPassword('');
+    setResetNewPasswordConfirm('');
+    setResetMaskedEmail('');
+    setResetDevCode('');
+    setResetMessage('');
+    setResetError('');
+    setShowResetPassword(false);
+    setShowResetPasswordConfirm(false);
+  };
+
+  const closeResetPasswordModal = () => {
+    setShowResetPwModal(false);
+    setResetStep('email');
+    setResetVerificationId('');
+    setResetCode('');
+    setResetNewPassword('');
+    setResetNewPasswordConfirm('');
+    setResetMaskedEmail('');
+    setResetDevCode('');
+    setResetMessage('');
+    setResetError('');
+    setResetSubmitting(false);
+    setShowResetPassword(false);
+    setShowResetPasswordConfirm(false);
   };
 
   const fillDemoAccount = () => {
@@ -348,7 +462,7 @@ export default function Login() {
           </button>
           <span className="text-slate-300">|</span>
           <button 
-            onClick={() => { setShowResetPwModal(true); setTempPasswordResult(''); setResetPwEmail(''); }} 
+            onClick={openResetPasswordModal} 
             className="hover:text-primary transition-colors underline font-semibold"
             style={{ background: 'none', border: 'none', cursor: 'pointer' }}
           >
@@ -499,43 +613,164 @@ export default function Login() {
 
       {/* PW Recovery Modal */}
       {showResetPwModal && (
-        <div className="recovery-modal" onClick={() => setShowResetPwModal(false)}>
-          <div className="recovery-container animate-fade-in" onClick={(e) => e.stopPropagation()}>
+        <div className="recovery-modal" onClick={() => closeResetPasswordModal()}>
+          <div className="recovery-container recovery-container-reset animate-fade-in" onClick={(e) => e.stopPropagation()}>
             <div className="recovery-header">
-              <h3>???? ??</h3>
-              <button onClick={() => setShowResetPwModal(false)} className="text-slate-400 hover:text-slate-600 transition-colors">
+              <h3>{resetStep === 'done' ? '???? ?? ??' : '???? ??'}</h3>
+              <button
+                onClick={() => closeResetPasswordModal()}
+                className="text-slate-400 hover:text-slate-600 transition-colors"
+              >
                 <X size={18} />
               </button>
             </div>
-            <form onSubmit={handleResetPassword}>
-              <div className="recovery-body">
-                <div className="recovery-input-group">
-                  <label className="recovery-label">??? ??</label>
-                  <input
-                    type="email"
-                    value={resetPwEmail}
-                    onChange={(e) => setResetPwEmail(e.target.value)}
-                    className="recovery-input"
-                    placeholder="example@youngtech.com"
-                    required
-                    autoFocus
-                  />
+
+            <form onSubmit={resetStep === 'verify' ? handleVerifyResetCode : handleRequestResetCode}>
+              <div className="recovery-body reset-password-body">
+                <div className="reset-password-hero">
+                  <div className="reset-password-icon">
+                    <MailCheck size={20} />
+                  </div>
+                  <div>
+                    <b>{resetStep === 'verify' ? '???? ?? ????? ??? ???.' : '???? ????? ?????.'}</b>
+                    <p>{resetStep === 'verify' ? '????? ??? ? ? ????? ??? ? ????.' : '??? ??? ??? ???? ????? ?????.'}</p>
+                  </div>
                 </div>
 
-                {tempPasswordResult && (
-                  <div className="result-box mt-2" style={{ backgroundColor: '#f0fdf4', borderColor: '#bbf7d0' }}>
-                    <span className="font-bold text-green-800">?? ????? ???????.</span>
-                    <span className="text-3xs text-slate-500">?? ?? ??? ???? ?????.</span>
-                    <div className="p-3 bg-white border border-green-200 rounded mt-2 text-center text-base font-black text-green-700 tracking-wider">
-                      {tempPasswordResult}
-                    </div>
-                    <span className="text-3xs text-slate-500 text-center mt-1">??? ? ??????? ????? ??? ???.</span>
+                {resetStep === 'email' && (
+                  <div className="recovery-input-group">
+                    <label className="recovery-label">??? ??</label>
+                    <input
+                      type="email"
+                      value={resetPwEmail}
+                      onChange={(e) => setResetPwEmail(e.target.value)}
+                      className="recovery-input"
+                      placeholder="example@youngtech.com"
+                      required
+                      autoFocus
+                    />
                   </div>
                 )}
+
+                {resetStep === 'verify' && (
+                  <>
+                    <div className="reset-password-email-card">
+                      <span>인증번호 발송 대상</span>
+                      <b>{resetMaskedEmail || resetPwEmail}</b>
+                    </div>
+
+                    <div className="reset-password-code-row">
+                      <div className="recovery-input-group reset-password-code-input">
+                        <label className="recovery-label">인증번호</label>
+                        <input
+                          type="text"
+                          value={resetCode}
+                          onChange={(e) => setResetCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                          className="recovery-input"
+                          placeholder="6자리 인증번호"
+                          inputMode="numeric"
+                          autoFocus
+                          required
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        className="reset-password-code-btn"
+                        onClick={handleRequestResetCode}
+                        disabled={resetSubmitting}
+                      >
+                        인증번호 발급받기
+                      </button>
+                    </div>
+
+                    <div className="recovery-input-grid">
+                      <div className="recovery-input-group">
+                        <label className="recovery-label">새 비밀번호</label>
+                        <div className="password-field-wrapper">
+                          <input
+                            type={showResetPassword ? 'text' : 'password'}
+                            value={resetNewPassword}
+                            onChange={(e) => setResetNewPassword(e.target.value)}
+                            className="recovery-input password-recovery-input"
+                            placeholder="새 비밀번호 입력"
+                            required
+                          />
+                          <button
+                            type="button"
+                            className="password-toggle-btn recovery-password-toggle"
+                            onClick={() => setShowResetPassword((prev) => !prev)}
+                            aria-label={showResetPassword ? '비밀번호 숨기기' : '비밀번호 보기'}
+                          >
+                            {showResetPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                          </button>
+                        </div>
+                      </div>
+                      <div className="recovery-input-group">
+                        <label className="recovery-label">새 비밀번호 확인</label>
+                        <div className="password-field-wrapper">
+                          <input
+                            type={showResetPasswordConfirm ? 'text' : 'password'}
+                            value={resetNewPasswordConfirm}
+                            onChange={(e) => setResetNewPasswordConfirm(e.target.value)}
+                            className="recovery-input password-recovery-input"
+                            placeholder="한 번 더 입력"
+                            required
+                          />
+                          <button
+                            type="button"
+                            className="password-toggle-btn recovery-password-toggle"
+                            onClick={() => setShowResetPasswordConfirm((prev) => !prev)}
+                            aria-label={showResetPasswordConfirm ? '비밀번호 숨기기' : '비밀번호 보기'}
+                          >
+                            {showResetPasswordConfirm ? <EyeOff size={16} /> : <Eye size={16} />}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="reset-password-note">
+                      <span>인증번호는 10분 동안 유효하며, 5회 실패 시 다시 발급해야 합니다.</span>
+                      {resetDevCode && <b>개발 테스트용 인증번호: {resetDevCode}</b>}
+                    </div>
+                  </>
+                )}
+
+                {resetStep === 'done' && resetMessage && (
+                  <div className="result-box mt-2" style={{ backgroundColor: '#f0fdf4', borderColor: '#bbf7d0' }}>
+                    <span className="font-bold text-green-800">{resetMessage}</span>
+                    <span className="text-3xs text-slate-500">?? ? ????? ???? ? ????.</span>
+                  </div>
+                )}
+
+                {resetError && <div className="result-box mt-2 result-box-error">{resetError}</div>}
+                {!resetError && resetStep !== 'done' && resetMessage && <div className="result-box mt-2 result-box-info">{resetMessage}</div>}
               </div>
+
               <div className="recovery-footer">
-                <button type="button" onClick={() => setShowResetPwModal(false)} className="btn-recovery-cancel">??</button>
-                <button type="submit" className="btn-recovery-submit">?? ???? ??</button>
+                <button
+                  type="button"
+                  onClick={() => closeResetPasswordModal()}
+                  className="btn-recovery-cancel"
+                >
+                  ??
+                </button>
+                {resetStep === 'done' ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      closeResetPasswordModal();
+                      setResetStep('email');
+                      setResetPwEmail('');
+                    }}
+                    className="btn-recovery-submit"
+                  >
+                    ????? ??
+                  </button>
+                ) : (
+                  <button type="submit" className="btn-recovery-submit" disabled={resetSubmitting}>
+                    {resetSubmitting ? '?? ?...' : (resetStep === 'verify' ? '???? ??' : '???? ??')}
+                  </button>
+                )}
               </div>
             </form>
           </div>

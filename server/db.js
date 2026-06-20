@@ -432,7 +432,20 @@ export async function initDb() {
       )
     `);
 
-    // 10. SweetTracker quota protection tables
+    // 10. Password reset verification codes
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS password_reset_verifications (
+        id VARCHAR(100) PRIMARY KEY,
+        email VARCHAR(150) NOT NULL,
+        code_hash VARCHAR(255) NOT NULL,
+        failed_count INT DEFAULT 0,
+        expires_at DATETIME NOT NULL,
+        completed_at DATETIME DEFAULT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // 11. SweetTracker quota protection tables
     await connection.query(`
       CREATE TABLE IF NOT EXISTS delivery_tracking_cache (
         cache_key VARCHAR(255) PRIMARY KEY,
@@ -495,6 +508,8 @@ export async function initDb() {
     await ensureIndex(connection, 'social_link_history', 'idx_social_link_history_provider', '`provider`, `created_at`');
     await ensureIndex(connection, 'signup_email_verifications', 'idx_signup_verify_email', '`email`, `created_at`');
     await ensureIndex(connection, 'signup_email_verifications', 'idx_signup_verify_expires', '`expires_at`');
+    await ensureIndex(connection, 'password_reset_verifications', 'idx_password_reset_verify_email', '`email`, `created_at`');
+    await ensureIndex(connection, 'password_reset_verifications', 'idx_password_reset_verify_expires', '`expires_at`');
     await ensureIndex(connection, 'delivery_tracking_cache', 'idx_delivery_cache_expire', '`expire_at`');
     await ensureIndex(connection, 'delivery_tracking_cache', 'idx_delivery_cache_user_order', '`user_id`, `order_id`');
 

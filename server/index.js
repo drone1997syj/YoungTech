@@ -21,6 +21,7 @@ const PORT = process.env.PORT || 5000;
 const JWT_SECRET = process.env.JWT_SECRET || 'youngtech_super_secret_jwt_key_2026';
 const LOGIN_LOCK_MINUTES = 30;
 const UNLOCK_CODE_MINUTES = 15;
+const PASSWORD_RESET_CODE_MINUTES = 10;
 const loginIpBuckets = new Map();
 
 app.use(cors());
@@ -146,6 +147,7 @@ const isLoginIpLimited = (req) => {
 const getLoginLimitForRole = (role) => (role === 'admin' ? 5 : 7);
 
 const createUnlockCode = () => String(Math.floor(100000 + Math.random() * 900000));
+const createPasswordResetCode = () => createUnlockCode();
 
 const buildLockMessage = (limit) => (
   `로그인 실패가 ${limit}회 이상 발생해 계정 보호를 위해 로그인이 제한되었습니다. 가입한 이메일로 인증 후 다시 이용해 주세요.`
@@ -177,6 +179,7 @@ const validatePasswordPolicy = (password, context = {}) => {
 const createLockUntilDate = () => new Date(Date.now() + LOGIN_LOCK_MINUTES * 60 * 1000);
 
 const createUnlockExpireDate = () => new Date(Date.now() + UNLOCK_CODE_MINUTES * 60 * 1000);
+const createPasswordResetExpireDate = () => new Date(Date.now() + PASSWORD_RESET_CODE_MINUTES * 60 * 1000);
 
 const deriveOrderStatusFromItems = (items, fallbackStatus = 'pending') => {
   const statuses = (items || []).map(item => item.status || fallbackStatus).filter(Boolean);
@@ -602,6 +605,110 @@ app.post('/api/auth/find-id', async (req, res) => {
     });
   } catch (error) {
     console.error('Find ID Error:', error);
+    res.status(500).json({ message: '서버 내부 오류가 발생했습니다.' });
+  }
+});
+
+// 비밀번호 찾기 인증번호 발급 API
+app.post('/api/auth/request-password-reset-code', async (req, res) => {
+  const { email } = req.body;
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+
+  if (!normalizedEmail) {
+    return res.status(400).json({ message: '이메일을 입력해 주세요.' });
+  }
+
+  try {
+    const [rows] = await pool.query('SELECT id FROM users WHERE email = ?', [normalizedEmail]);
+    if (rows.length === 0) {
+      return res.status(404).json({ message: '가입된 이메일을 찾을 수 없습니다.' });
+    }
+
+    const code = createPasswordResetCode();
+    const verificationId = crypto.randomUUID();
+    const codeHash = bcrypt.hashSync(code, 10);
+
+    await pool.query('DELETE FROM password_reset_verifications WHERE email = ? AND completed_at IS NULL', [normalizedEmail]);
+    await pool.query(
+      `INSERT INTO password_reset_verifications
+       (id, email, code_hash, failed_count, expires_at)
+       VALUES (?, ?, ?, 0, ?)`,
+      [verificationId, normalizedEmail, codeHash, createPasswordResetExpireDate()]
+    );
+
+    const mailResult = await sendMail({
+      to: normalizedEmail,
+      subject: '[YoungTech] 비밀번호 찾기 인증번호',
+      text: `YoungTech 비밀번호 찾기 인증번호는 ${code} 입니다.\n\n인증번호는 ${PASSWORD_RESET_CODE_MINUTES}분 동안만 사용할 수 있으며, 5회 이상 틀리면 다시 인증번호를 요청해야 합니다.\n본인이 요청하지 않았다면 이 메일을 무시해 주세요.`
+    });
+
+    res.json({
+      success: true,
+      verificationId,
+      maskedEmail: maskEmailForRecovery(normalizedEmail),
+      message: '입력하신 이메일로 인증번호를 보냈습니다. 인증번호를 입력하면 새 비밀번호를 설정할 수 있습니다.',
+      devVerificationCode: mailResult.devMode ? code : undefined
+    });
+  } catch (error) {
+    console.error('Request Password Reset Code Error:', error);
+    res.status(500).json({ message: '서버 내부 오류가 발생했습니다.' });
+  }
+});
+
+// 비밀번호 찾기 인증번호 확인 후 새 비밀번호 설정 API
+app.post('/api/auth/verify-password-reset-code', async (req, res) => {
+  const { verificationId, code, newPassword } = req.body;
+  const normalizedCode = String(code || '').replace(/\D/g, '');
+
+  if (!verificationId || normalizedCode.length !== 6 || !newPassword) {
+    return res.status(400).json({ message: '인증번호와 새 비밀번호를 입력해 주세요.' });
+  }
+
+  try {
+    const [rows] = await pool.query('SELECT * FROM password_reset_verifications WHERE id = ?', [verificationId]);
+    if (rows.length === 0) {
+      return res.status(404).json({ message: '발급된 인증번호를 찾을 수 없습니다. 다시 요청해 주세요.' });
+    }
+
+    const verification = rows[0];
+    if (verification.completed_at) {
+      return res.status(400).json({ message: '이미 사용된 인증번호입니다. 다시 요청해 주세요.' });
+    }
+
+    if (new Date(verification.expires_at) <= new Date()) {
+      return res.status(400).json({ message: '인증번호 유효시간이 지났습니다. 다시 요청해 주세요.' });
+    }
+
+    if (Number(verification.failed_count || 0) >= 5) {
+      return res.status(429).json({ message: '인증번호 입력 실패가 5회를 초과했습니다. 다시 요청해 주세요.' });
+    }
+
+    const isValidCode = bcrypt.compareSync(normalizedCode, verification.code_hash);
+    if (!isValidCode) {
+      const nextCount = Number(verification.failed_count || 0) + 1;
+      await pool.query('UPDATE password_reset_verifications SET failed_count = ? WHERE id = ?', [nextCount, verificationId]);
+      return res.status(400).json({
+        message: nextCount >= 5
+          ? '인증번호 입력 실패가 5회를 초과했습니다. 다시 요청해 주세요.'
+          : `인증번호가 일치하지 않습니다. 남은 시도 횟수: ${5 - nextCount}회`
+      });
+    }
+
+    const passwordError = validatePasswordPolicy(newPassword, { email: verification.email });
+    if (passwordError) {
+      return res.status(400).json({ message: passwordError });
+    }
+
+    const hashedPassword = bcrypt.hashSync(newPassword, 10);
+    await pool.query('UPDATE users SET password = ? WHERE email = ?', [hashedPassword, verification.email]);
+    await pool.query('UPDATE password_reset_verifications SET completed_at = NOW() WHERE id = ?', [verificationId]);
+
+    res.json({
+      success: true,
+      message: '비밀번호가 변경되었습니다. 새 비밀번호로 다시 로그인해 주세요.'
+    });
+  } catch (error) {
+    console.error('Verify Password Reset Code Error:', error);
     res.status(500).json({ message: '서버 내부 오류가 발생했습니다.' });
   }
 });
