@@ -236,13 +236,14 @@ app.post('/api/auth/register', async (req, res, next) => {
   const normalizedEmail = String(email || '').trim().toLowerCase();
   const normalizedName = String(name || '').trim();
   const normalizedPhone = String(phone || '').replace(/\D/g, '');
+  const storedPhone = normalizedPhone || '';
 
-  if (!normalizedEmail || !password || !normalizedName || !normalizedPhone) {
-    return res.status(400).json({ message: '이메일, 비밀번호, 이름, 휴대폰 번호를 모두 입력해 주세요.' });
+  if (!normalizedEmail || !password || !normalizedName) {
+    return res.status(400).json({ message: '???, ????, ??? ?? ??? ???.' });
   }
 
-  if (!/^01\d{8,9}$/.test(normalizedPhone)) {
-    return res.status(400).json({ message: '휴대폰 번호를 올바르게 입력해 주세요. 예: 010-1234-5678' });
+  if (storedPhone && !/^01\d{8,9}$/.test(storedPhone)) {
+    return res.status(400).json({ message: '??? ??? ???? ??? ???. ?: 010-1234-5678' });
   }
 
   const passwordError = validatePasswordPolicy(password, { email: normalizedEmail, name: normalizedName });
@@ -270,7 +271,7 @@ app.post('/api/auth/register', async (req, res, next) => {
       `INSERT INTO signup_email_verifications
        (id, email, password_hash, name, phone, code_hash, failed_count, expires_at)
        VALUES (?, ?, ?, ?, ?, ?, 0, DATE_ADD(NOW(), INTERVAL 10 MINUTE))`,
-      [verificationId, normalizedEmail, hashedPassword, normalizedName, normalizedPhone, bcrypt.hashSync(code, 10)]
+      [verificationId, normalizedEmail, hashedPassword, normalizedName, storedPhone, bcrypt.hashSync(code, 10)]
     );
 
     const mailResult = await sendMail({
@@ -356,13 +357,14 @@ app.post('/api/auth/register/verify', async (req, res) => {
 app.post('/api/auth/register', async (req, res) => {
   const { email, password, name, phone } = req.body;
   const normalizedPhone = String(phone || '').replace(/\D/g, '');
+  const storedPhone = normalizedPhone || '';
 
-  if (!email || !password || !name || !normalizedPhone) {
-    return res.status(400).json({ message: '이메일, 비밀번호, 이름, 휴대폰 번호를 모두 입력해주세요.' });
+  if (!email || !password || !name) {
+    return res.status(400).json({ message: '???, ????, ??? ?? ??? ???.' });
   }
 
-  if (!/^01\d{8,9}$/.test(normalizedPhone)) {
-    return res.status(400).json({ message: '휴대폰 번호를 올바르게 입력해주세요.' });
+  if (storedPhone && !/^01\d{8,9}$/.test(storedPhone)) {
+    return res.status(400).json({ message: '??? ??? ???? ??? ???.' });
   }
 
   const passwordError = validatePasswordPolicy(password, { email, name });
@@ -381,7 +383,7 @@ app.post('/api/auth/register', async (req, res) => {
 
     await pool.query(
       'INSERT INTO users (id, email, password, name, phone, role) VALUES (?, ?, ?, ?, ?, ?)',
-      [userId, email, hashedPassword, name, normalizedPhone, 'user']
+      [userId, email, hashedPassword, name, storedPhone, 'user']
     );
 
     res.status(201).json({ message: '회원가입이 완료되었습니다.' });

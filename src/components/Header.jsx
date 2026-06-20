@@ -30,7 +30,7 @@ export default function Header() {
     [categories]
   );
 
-  const cartCount = cart.reduce((sum, item) => sum + item.quantity, 0);
+  const cartCount = user ? cart.reduce((sum, item) => sum + item.quantity, 0) : 0;
   const displayName = user?.name?.trim() || user?.email?.split('@')[0] || '고객';
 
   const handleSearchSubmit = (e) => {

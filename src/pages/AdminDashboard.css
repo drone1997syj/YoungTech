@@ -1,9 +1,9 @@
 /* Admin Dashboard Stylings */
 
 .admin-dashboard-page {
-  max-width: 1200px;
+  max-width: 1680px;
   margin: 0 auto;
-  padding: 2rem 1rem;
+  padding: 1.75rem 1.5rem 2.5rem;
 }
 
 .admin-header {
@@ -810,10 +810,131 @@
 
 .modal-content {
   background: #ffffff;
-  border-radius: 16px;
+  border-radius: 20px;
   box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
-  max-height: 90vh;
+  max-height: 94vh;
   overflow-y: auto;
+}
+
+.admin-product-modal {
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  overflow: hidden;
+}
+
+.product-modal-shell {
+  padding: 28px 30px 30px;
+  background:
+    radial-gradient(circle at top right, rgba(124, 58, 237, 0.04), transparent 28%),
+    linear-gradient(180deg, #ffffff 0%, #fcfcfd 100%);
+}
+
+.product-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 18px;
+}
+
+.product-modal-titlegroup {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.product-modal-kicker {
+  color: var(--primary);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.product-modal-title {
+  margin: 0;
+  color: #0f172a;
+  font-size: 1.45rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+
+.product-modal-subtitle {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.84rem;
+  line-height: 1.5;
+}
+
+.product-modal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.product-modal-card {
+  padding: 16px 18px;
+  border: 1px solid #e5e7eb;
+  border-radius: 18px;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+}
+
+.product-modal-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.product-modal-grid.two-col {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.product-modal-grid.inner-two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.product-image-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.product-description-area {
+  min-height: 230px;
+}
+
+.specs-section {
+  background: linear-gradient(180deg, #fafafa 0%, #ffffff 100%);
+  border: 1px solid #e5e7eb;
+  border-radius: 16px;
+  padding: 16px;
+}
+
+.product-modal-footer {
+  padding-top: 2px;
+}
+
+.admin-product-modal .form-input,
+.admin-product-modal .form-select,
+.admin-product-modal textarea {
+  border-radius: 12px;
+  border-color: #dbe3ef;
+  background-color: #ffffff;
+  box-shadow: none;
+}
+
+.admin-product-modal .form-input:focus,
+.admin-product-modal .form-select:focus,
+.admin-product-modal textarea:focus {
+  border-color: rgba(124, 58, 237, 0.8);
+  box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.12);
+}
+
+.admin-product-modal .form-label {
+  color: #334155;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
 }
 
 .modal-close-button {
@@ -833,6 +954,21 @@
 .modal-close-button:hover {
   background: #f8fafc;
   border-color: #cbd5e1;
+}
+
+@media (max-width: 1024px) {
+  .product-modal-shell {
+    padding: 22px 18px 20px;
+  }
+
+  .product-modal-grid.two-col,
+  .product-modal-grid.inner-two {
+    grid-template-columns: 1fr;
+  }
+
+  .product-modal-title {
+    font-size: 1.2rem;
+  }
 }
 
 /* Animate Classes */

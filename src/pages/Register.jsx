@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useShop } from '../context/ShopContext';
 import { loadGoogleIdentityScript, requestGoogleAccessToken } from '../utils/googleAuth';
-import { UserPlus, ArrowLeft, LogIn, Eye, EyeOff, Phone, MailCheck, ShieldCheck } from 'lucide-react';
+import { UserPlus, ArrowLeft, LogIn, Eye, EyeOff, MailCheck, ShieldCheck } from 'lucide-react';
 import SocialAccountLinkModal from '../components/SocialAccountLinkModal';
 import './Auth.css';
 
@@ -12,7 +12,6 @@ export default function Register() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [name, setName] = useState('');
-  const [phone, setPhone] = useState('');
   const [verification, setVerification] = useState(null);
   const [verificationCode, setVerificationCode] = useState('');
 
@@ -28,13 +27,6 @@ export default function Register() {
   }, []);
 
   const isTunnel = window.location.hostname.includes('trycloudflare.com') || window.location.hostname.includes('loca.lt');
-
-  const formatPhoneNumber = (value) => {
-    const digits = value.replace(/\D/g, '').slice(0, 11);
-    if (digits.length <= 3) return digits;
-    if (digits.length <= 7) return `${digits.slice(0, 3)}-${digits.slice(3)}`;
-    return `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7)}`;
-  };
 
   if (user) {
     navigate('home');
@@ -105,11 +97,8 @@ export default function Register() {
   };
 
   const validateForm = () => {
-    if (!email || !password || !confirmPassword || !name || !phone) {
-      return '모든 필수 입력 항목을 입력해 주세요.';
-    }
-    if (!/^01\d{8,9}$/.test(phone.replace(/\D/g, ''))) {
-      return '휴대폰 번호를 올바르게 입력해 주세요. 예: 010-1234-5678';
+    if (!email || !password || !confirmPassword || !name) {
+      return '?? ?? ?? ??? ??? ???.';
     }
     if (
       password.length < 8 ||
@@ -119,10 +108,10 @@ export default function Register() {
       !/\d/.test(password) ||
       !/[!@#$%^&*()_\-+=[\]{};':"\\|,.<>/?`~]/.test(password)
     ) {
-      return '비밀번호는 8자 이상 64자 이하이며 영문, 숫자, 특수문자를 모두 포함해야 합니다.';
+      return '????? 8? ?? 64? ???? ??, ??, ????? ?? ???? ???.';
     }
     if (password !== confirmPassword) {
-      return '입력하신 비밀번호가 일치하지 않습니다. 다시 확인해 주세요.';
+      return '???? ????? ???? ????. ?? ??? ???.';
     }
     return '';
   };
@@ -139,7 +128,7 @@ export default function Register() {
     }
 
     setSubmitting(true);
-    const res = await register(email, password, name, phone);
+    const res = await register(email, password, name, '');
     setSubmitting(false);
 
     if (res.success && res.requiresEmailVerification) {
@@ -256,7 +245,7 @@ export default function Register() {
                 정보 수정
               </button>
               <button type="submit" className="btn btn-primary flex-1 py-2.5 font-bold text-sm" disabled={submitting}>
-                {submitting ? '확인 중...' : '인증하고 가입 완료'}
+                {submitting ? '처리 중...' : '가입하기'}
               </button>
             </div>
           </form>
@@ -334,25 +323,8 @@ export default function Register() {
                 />
               </div>
 
-              <div className="form-group">
-                <label className="form-label text-xs font-bold text-dark mb-1">휴대폰 번호 *</label>
-                <div className="phone-input-wrapper">
-                  <Phone size={15} />
-                  <input
-                    type="tel"
-                    className="form-input text-sm"
-                    value={phone}
-                    onChange={(e) => setPhone(formatPhoneNumber(e.target.value))}
-                    placeholder="010-1234-5678"
-                    inputMode="numeric"
-                    required
-                  />
-                </div>
-                <p className="form-help-text">아이디 찾기와 주문 연락에 사용됩니다.</p>
-              </div>
-
               <button type="submit" className="btn btn-primary w-full py-2.5 font-bold text-sm mt-4" disabled={submitting}>
-                {submitting ? '인증번호 발송 중...' : '이메일 인증 후 가입하기'}
+                {submitting ? '처리 중...' : '가입하기'}
               </button>
             </form>
 

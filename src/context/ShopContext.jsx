@@ -277,7 +277,7 @@ export const ShopProvider = ({ children }) => {
     }
   };
 
-  const register = async (email, password, name, phone) => {
+  const register = async (email, password, name, phone = '') => {
     try {
       const data = await apiFetch('/auth/register', {
         method: 'POST',

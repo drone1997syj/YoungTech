@@ -60,7 +60,7 @@ export default function AdminDashboard() {
   const [showProductModal, setShowProductModal] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
   const [prodForm, setProdForm] = useState({
-    id: '', name: '', category: 'motor', brand: '', price: '', image: '', images: [], description: '', stock: 50, is_active: true,
+    id: '', name: '', category: 'motor', sub_category: '', brand: '', price: '', image: '', images: [], description: '', stock: 50, is_active: true,
     specs: { '메이커': '', '스펙설명': '' }
   });
   const [formError, setFormError] = useState('');
@@ -370,6 +370,20 @@ export default function AdminDashboard() {
   const categoryTree = categoryTreeData.tree;
   const categoryLookup = categoryTreeData.lookup;
   const parentCategoryOptions = categoryTree;
+  const getCategoryChildren = (parentId) => {
+    const normalizedParentId = normalizeCategoryParentId(parentId);
+    if (!normalizedParentId) return categoryTree;
+    return categoryLookup.get(normalizedParentId)?.children || [];
+  };
+  const resolveProductCategorySelection = (categoryId) => {
+    const normalizedCategoryId = String(categoryId || '');
+    const categoryNode = categoryLookup.get(normalizedCategoryId) || localCategories.find((cat) => String(cat.id) === normalizedCategoryId);
+    const parentId = normalizeCategoryParentId(categoryNode?.parent_id);
+    return {
+      category: parentId || normalizedCategoryId,
+      sub_category: parentId ? normalizedCategoryId : ''
+    };
+  };
 
   const markCategoryDirty = () => {
     setCategoryDirty(true);
@@ -792,10 +806,12 @@ export default function AdminDashboard() {
       }
     }
 
+    const categorySelection = resolveProductCategorySelection(p.category);
     setProdForm({
       id: `${p.id}-copy`,
       name: `${p.name} (복사본)`,
-      category: p.category,
+      category: categorySelection.category,
+      sub_category: categorySelection.sub_category,
       brand: p.brand || '',
       price: p.price,
       image: p.image,
@@ -918,8 +934,9 @@ export default function AdminDashboard() {
 
   const openAddModal = (initialCategory = 'motor') => {
     setEditingProduct(null);
+    const categorySelection = resolveProductCategorySelection(initialCategory);
     setProdForm({
-      id: '', name: '', category: initialCategory, brand: '', price: '', image: '', images: [], description: '', stock: 50, is_active: true,
+      id: '', name: '', category: categorySelection.category, sub_category: categorySelection.sub_category, brand: '', price: '', image: '', images: [], description: '', stock: 50, is_active: true,
       specs: { '메이커': '', '상세정보': '' }
     });
     setFormError('');
@@ -929,10 +946,12 @@ export default function AdminDashboard() {
 
   const openEditModal = (p) => {
     setEditingProduct(p);
+    const categorySelection = resolveProductCategorySelection(p.category);
     setProdForm({
       id: p.id,
       name: p.name,
-      category: p.category,
+      category: categorySelection.category,
+      sub_category: categorySelection.sub_category,
       brand: p.brand || '',
       price: p.price,
       image: p.image || '',
@@ -972,9 +991,14 @@ export default function AdminDashboard() {
       return;
     }
 
+    const finalCategory = prodForm.sub_category || prodForm.category;
+    const finalProductId = editingProduct
+      ? prodForm.id
+      : (prodForm.id || `product-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`);
+
     // Front-end Price Anomaly Detection (10x check)
     // Find other products in the same category
-    const sameCatProds = products.filter(p => p.category === prodForm.category && p.id !== prodForm.id);
+    const sameCatProds = products.filter(p => p.category === finalCategory && p.id !== finalProductId);
     if (sameCatProds.length > 0 && !priceConfirmed) {
       const sum = sameCatProds.reduce((acc, curr) => acc + curr.price, 0);
       const avg = sum / sameCatProds.length;
@@ -993,6 +1017,9 @@ export default function AdminDashboard() {
     // Merge images array to a single comma-separated string for DB storage
     const submitData = {
       ...prodForm,
+      id: finalProductId,
+      category: finalCategory,
+      is_active: true,
       image: prodForm.images.join(',')
     };
 
@@ -2542,262 +2569,278 @@ export default function AdminDashboard() {
       {/* Modal: Product Add/Edit */}
       {showProductModal && (
         <div className="modal-backdrop flex items-center justify-center p-4">
-          <div 
-            className="modal-content card p-6 max-w-lg w-full relative animate-scale-up"
-            style={{ maxHeight: '85vh', overflowY: 'auto' }}
+          <div
+            className="modal-content admin-product-modal card relative animate-scale-up"
+            style={{ width: 'min(96vw, 1240px)', maxHeight: '94vh', overflowY: 'auto' }}
           >
-            <div className="flex items-start justify-between gap-3 mb-4">
-              <h3 className="font-extrabold text-dark text-sm border-b pb-2 mb-0 flex-1">
-                {editingProduct ? '상품 수정' : '상품 추가'}
-              </h3>
-              <button
-                onClick={() => setShowProductModal(false)}
-                className="modal-close-button text-light hover:text-dark"
-                aria-label="닫기"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            {formError && (
-              <div className="alert-box alert-danger mb-4 text-xs font-semibold flex items-center gap-1">
-                <AlertTriangle size={12} /> {formError}
-              </div>
-            )}
-
-            <form onSubmit={handleProductSubmit} className="flex flex-col gap-4">
-              <div className="grid grid-cols-2 gap-4 bg-slate-50 border rounded-xl p-3">
-                <div className="form-group">
-                  <label className="form-label text-xs font-bold mb-1">브랜드</label>
-                  <input
-                    type="text"
-                    className="form-input text-xs"
-                    value={prodForm.brand || ''}
-                    onChange={(e) => setProdForm({...prodForm, brand: e.target.value})}
-                    placeholder="예: 파나소닉, 미쓰비시, 파스텍"
-                  />
+            <div className="product-modal-shell">
+              <div className="product-modal-header">
+                <div className="product-modal-titlegroup">
+                  <span className="product-modal-kicker">{editingProduct ? '상품 수정' : '상품 등록'}</span>
+                  <h3 className="product-modal-title">관리자 상품 입력 화면</h3>
+                  <p className="product-modal-subtitle">상품 정보, 카테고리, 이미지와 상세 사양을 한 화면에서 정리합니다.</p>
                 </div>
-                <label className="form-group flex items-center gap-2 pt-6 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={prodForm.is_active !== false}
-                    onChange={(e) => setProdForm({...prodForm, is_active: e.target.checked})}
-                  />
-                  <span className="text-xs font-bold text-dark">고객 화면에 노출</span>
-                </label>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="form-group">
-                  <label className="form-label text-xs font-bold mb-1">상품 고유 ID *</label>
-                  <input 
-                    type="text" 
-                    className="form-input text-xs"
-                    value={prodForm.id}
-                    onChange={(e) => setProdForm({...prodForm, id: e.target.value})}
-                    placeholder="예: inovance-sv670"
-                    disabled={!!editingProduct}
-                    required
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label text-xs font-bold mb-1">카테고리 *</label>
-                  <select 
-                    className="form-select text-xs"
-                    value={prodForm.category}
-                    onChange={(e) => setProdForm({...prodForm, category: e.target.value})}
-                  >
-                    {categories && categories.map(cat => (
-                      <option key={cat.id} value={cat.id}>{cat.name}</option>
-                    ))}
-                  </select>
-                </div>
+                <button
+                  onClick={() => setShowProductModal(false)}
+                  className="modal-close-button text-light hover:text-dark"
+                  aria-label="닫기"
+                >
+                  <X size={18} />
+                </button>
               </div>
 
-              <div className="form-group">
-                <label className="form-label text-xs font-bold mb-1">상품명 *</label>
-                <input 
-                  type="text" 
-                  className="form-input text-xs"
-                  value={prodForm.name}
-                  onChange={(e) => setProdForm({...prodForm, name: e.target.value})}
-                  placeholder="예: 이노밴스 SV670 서보드라이브"
-                  required
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="form-group">
-                  <label className="form-label text-xs font-bold mb-1">판매 가격 (원) *</label>
-                  <input 
-                    type="number" 
-                    className="form-input text-xs font-bold text-primary"
-                    value={prodForm.price}
-                    onChange={(e) => {
-                      setProdForm({...prodForm, price: e.target.value});
-                      setPriceConfirmed(false); // Reset confirmation on change
-                    }}
-                    placeholder="숫자만 입력"
-                    required
-                  />
+              {formError && (
+                <div className="alert-box alert-danger mb-4 text-xs font-semibold flex items-center gap-1">
+                  <AlertTriangle size={12} /> {formError}
                 </div>
-                <div className="form-group">
-                  <label className="form-label text-xs font-bold mb-1">초기 재고수량</label>
-                  <input 
-                    type="number" 
-                    className="form-input text-xs"
-                    value={prodForm.stock}
-                    onChange={(e) => setProdForm({...prodForm, stock: Number(e.target.value)})}
-                    placeholder="수량"
-                  />
-                </div>
-              </div>
+              )}
 
-              <div className="form-group flex flex-col gap-2">
-                <label className="form-label text-xs font-bold">
-                  상품 이미지 등록 (최대 3장 - 현재 {(prodForm.images || []).length}/3장)
-                </label>
-                
-                {/* Images Preview List */}
-                {(prodForm.images || []).length > 0 && (
-                  <div className="flex gap-2 flex-wrap mb-2">
-                    {prodForm.images.map((imgUrl, idx) => (
-                      <div 
-                        key={idx}
-                        className="border rounded overflow-hidden"
-                        style={{ 
-                          position: 'relative', 
-                          width: '80px', 
-                          height: '80px', 
-                          backgroundColor: '#f8fafc',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center'
-                        }}
+              <form onSubmit={handleProductSubmit} className="product-modal-form">
+                <section className="product-modal-card">
+                  <div className="product-modal-grid two-col">
+                    <div className="form-group">
+                      <label className="form-label text-xs font-bold mb-1">카테고리 *</label>
+                      <select
+                        className="form-select text-xs h-11 bg-white"
+                        value={prodForm.category}
+                        onChange={(e) => setProdForm({
+                          ...prodForm,
+                          category: e.target.value,
+                          sub_category: ''
+                        })}
                       >
-                        <img 
-                          src={imgUrl} 
-                          alt={`Preview ${idx + 1}`} 
-                          style={{ 
-                            width: '100%', 
-                            height: '100%', 
-                            objectFit: 'cover' 
-                          }} 
-                        />
-                        <button 
-                          type="button" 
-                          onClick={() => handleRemoveImageIndex(idx)}
-                          style={{
-                            position: 'absolute',
-                            top: '4px',
-                            right: '4px',
-                            backgroundColor: '#ef4444',
-                            color: 'white',
-                            borderRadius: '9999px',
-                            border: 'none',
-                            width: '18px',
-                            height: '18px',
-                            cursor: 'pointer',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            padding: 0
+                        {(parentCategoryOptions || []).map((cat) => (
+                          <option key={cat.id} value={cat.id}>{cat.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label text-xs font-bold mb-1">하위 카테고리</label>
+                      <select
+                        className="form-select text-xs h-11 bg-white"
+                        value={prodForm.sub_category}
+                        onChange={(e) => setProdForm({...prodForm, sub_category: e.target.value})}
+                      >
+                        <option value="">선택 안 함</option>
+                        {getCategoryChildren(prodForm.category).map((cat) => (
+                          <option key={cat.id} value={cat.id}>{cat.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                </section>
+
+                <section className="product-modal-card">
+                  <div className="product-modal-grid two-col">
+                    <div className="form-group">
+                      <label className="form-label text-xs font-bold mb-1">상품명 *</label>
+                      <input
+                        type="text"
+                        className="form-input text-xs h-11"
+                        value={prodForm.name}
+                        onChange={(e) => setProdForm({...prodForm, name: e.target.value})}
+                        placeholder="예: 파나소닉 MINAS A6 750W 서보모터"
+                        required
+                      />
+                    </div>
+                    <div className="product-modal-grid inner-two">
+                      <div className="form-group">
+                        <label className="form-label text-xs font-bold mb-1">판매 가격 (원) *</label>
+                        <input
+                          type="number"
+                          className="form-input text-xs h-11 font-bold text-primary"
+                          value={prodForm.price}
+                          onChange={(e) => {
+                            setProdForm({...prodForm, price: e.target.value});
+                            setPriceConfirmed(false);
                           }}
-                          title="이미지 삭제"
-                        >
-                          <X size={10} />
-                        </button>
+                          placeholder="숫자만 입력"
+                          required
+                        />
                       </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* Add controls - only display if images count < 3 */}
-                {(prodForm.images || []).length < 3 ? (
-                  <div className="flex items-center gap-2 flex-wrap">
-                    {/* File Upload Trigger */}
-                    <div>
-                      <input 
-                        type="file" 
-                        onChange={handleImageUpload} 
-                        style={{ display: 'none' }} 
-                        id="img-upload-input" 
-                        accept="image/*" 
-                      />
-                      <label 
-                        htmlFor="img-upload-input" 
-                        className={`btn btn-secondary py-1.5 px-3 text-2xs cursor-pointer flex items-center gap-1.5 w-fit ${uploading ? 'opacity-50 cursor-not-allowed' : ''}`}
-                      >
-                        <Upload size={12} />
-                        {uploading ? '업로드 중...' : '컴퓨터에서 파일 선택'}
-                      </label>
-                    </div>
-
-                    <span className="text-2xs text-light font-bold">또는</span>
-
-                    {/* URL Text input with Add button */}
-                    <div className="flex-1 min-w-[200px] flex items-center gap-1">
-                      <input 
-                        type="text" 
-                        className="form-input text-xs flex-1 py-1.5"
-                        value={inputUrl}
-                        onChange={(e) => setInputUrl(e.target.value)}
-                        placeholder="이미지 URL 입력"
-                      />
-                      <button 
-                        type="button" 
-                        onClick={handleAddUrlImage}
-                        className="btn btn-primary py-1.5 px-2.5 text-2xs font-bold"
-                        style={{ height: '32px' }}
-                      >
-                        추가
-                      </button>
+                      <div className="form-group">
+                        <label className="form-label text-xs font-bold mb-1">초기 재고수량</label>
+                        <input
+                          type="number"
+                          className="form-input text-xs h-11"
+                          value={prodForm.stock}
+                          onChange={(e) => setProdForm({...prodForm, stock: Number(e.target.value)})}
+                          placeholder="수량"
+                        />
+                      </div>
                     </div>
                   </div>
-                ) : (
-                  <p className="text-2xs text-light italic">최대 3장의 사진 등록이 완료되었습니다. 다른 이미지를 올리려면 위 썸네일에서 삭제해 주세요.</p>
-                )}
-              </div>
+                </section>
 
-              <div className="form-group">
-                <label className="form-label text-xs font-bold mb-1">상품 설명</label>
-                <textarea 
-                  className="form-input text-xs h-20 resize-none"
-                  value={prodForm.description}
-                  onChange={(e) => setProdForm({...prodForm, description: e.target.value})}
-                  placeholder="상품 상세 소개 글"
-                />
-              </div>
+                
 
-              <div className="specs-section bg-slate-50 p-3 rounded border">
-                <h4 className="text-xs font-bold mb-2">상세 사양 명세 (Specs)</h4>
-                <div className="grid grid-cols-2 gap-2">
+                <section className="product-modal-card">
                   <div className="form-group">
-                    <label className="text-2xs text-light font-bold">제조 메이커</label>
-                    <input 
-                      type="text" 
-                      className="form-input text-xs"
-                      value={prodForm.specs['메이커'] || ''}
-                      onChange={(e) => handleSpecChange('메이커', e.target.value)}
-                      placeholder="예: INOVANCE"
+                    <label className="form-label text-xs font-bold mb-1">브랜드명</label>
+                    <input
+                      type="text"
+                      className="form-input text-xs h-11"
+                      value={prodForm.brand || ''}
+                      onChange={(e) => setProdForm({...prodForm, brand: e.target.value})}
+                      placeholder="예: 파나소닉, 미쓰비시, 파스텍"
                     />
                   </div>
+                </section>
+
+                <section className="product-modal-card">
+                  <div className="form-group flex flex-col gap-2">
+                    <label className="form-label text-xs font-bold">
+                      상품 이미지 등록 (최대 3장 - 현재 {(prodForm.images || []).length}/3장)
+                    </label>
+
+                    {(prodForm.images || []).length > 0 && (
+                      <div className="flex gap-2 flex-wrap mb-2">
+                        {prodForm.images.map((imgUrl, idx) => (
+                          <div
+                            key={idx}
+                            className="border rounded overflow-hidden"
+                            style={{
+                              position: 'relative',
+                              width: '80px',
+                              height: '80px',
+                              backgroundColor: '#f8fafc',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center'
+                            }}
+                          >
+                            <img
+                              src={imgUrl}
+                              alt={`Preview ${idx + 1}`}
+                              style={{
+                                width: '100%',
+                                height: '100%',
+                                objectFit: 'cover'
+                              }}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveImageIndex(idx)}
+                              style={{
+                                position: 'absolute',
+                                top: '4px',
+                                right: '4px',
+                                backgroundColor: '#ef4444',
+                                color: 'white',
+                                borderRadius: '9999px',
+                                border: 'none',
+                                width: '18px',
+                                height: '18px',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                padding: 0
+                              }}
+                              title="이미지 삭제"
+                            >
+                              <X size={10} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {(prodForm.images || []).length < 3 ? (
+                      <div className="product-image-row">
+                        <div>
+                          <input
+                            type="file"
+                            onChange={handleImageUpload}
+                            style={{ display: 'none' }}
+                            id="img-upload-input"
+                            accept="image/*"
+                          />
+                          <label
+                            htmlFor="img-upload-input"
+                            className={`btn btn-secondary py-2 px-3 text-2xs cursor-pointer flex items-center gap-1.5 w-fit ${uploading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                          >
+                            <Upload size={12} />
+                            {uploading ? '업로드 중...' : '컴퓨터에서 파일 선택'}
+                          </label>
+                        </div>
+
+                        <span className="text-2xs text-light font-bold">또는</span>
+
+                        <div className="flex-1 min-w-[200px] flex items-center gap-1">
+                          <input
+                            type="text"
+                            className="form-input text-xs flex-1 h-11"
+                            value={inputUrl}
+                            onChange={(e) => setInputUrl(e.target.value)}
+                            placeholder="이미지 URL 입력"
+                          />
+                          <button
+                            type="button"
+                            onClick={handleAddUrlImage}
+                            className="btn btn-primary py-2 px-3 text-2xs font-bold"
+                            style={{ height: '44px' }}
+                          >
+                            추가
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-2xs text-light italic">최대 3장의 사진 등록이 끝났습니다. 다른 이미지를 넣으려면 기존 이미지를 삭제해 주세요.</p>
+                    )}
+                  </div>
+                </section>
+
+                <section className="product-modal-card">
                   <div className="form-group">
-                    <label className="text-2xs text-light font-bold">상세 스펙 항목</label>
-                    <input 
-                      type="text" 
-                      className="form-input text-xs"
-                      value={prodForm.specs['상세정보'] || ''}
-                      onChange={(e) => handleSpecChange('상세정보', e.target.value)}
-                      placeholder="예: 23-bit, EtherCAT 지원"
+                    <label className="form-label text-xs font-bold mb-1">상품 설명</label>
+                    <textarea
+                      className="form-input text-xs product-description-area resize-y leading-relaxed"
+                      value={prodForm.description}
+                      onChange={(e) => setProdForm({...prodForm, description: e.target.value})}
+                      placeholder="상품 상세 소개 글"
                     />
                   </div>
+                </section>
+
+                <section className="product-modal-card">
+                  <div className="specs-section">
+                    <div className="flex items-center justify-between gap-3 mb-3">
+                      <h4 className="text-xs font-bold mb-0">상세 사양 명세 (Specs)</h4>
+                      <span className="text-3xs text-light font-semibold">판매 화면에 노출되지 않는 내부 사양 입력용</span>
+                    </div>
+                    <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+                      <div className="form-group">
+                        <label className="text-2xs text-light font-bold">제조 메이커</label>
+                        <input
+                          type="text"
+                          className="form-input text-xs h-11"
+                          value={prodForm.specs['메이커'] || ''}
+                          onChange={(e) => handleSpecChange('메이커', e.target.value)}
+                          placeholder="예: INOVANCE"
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label className="text-2xs text-light font-bold">상세 스펙 항목</label>
+                        <input
+                          type="text"
+                          className="form-input text-xs h-11"
+                          value={prodForm.specs['상세정보'] || ''}
+                          onChange={(e) => handleSpecChange('상세정보', e.target.value)}
+                          placeholder="예: 23-bit, EtherCAT 지원"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+                <div className="product-modal-footer">
+                  <button type="submit" className="btn btn-primary w-full py-3.5 font-bold text-xs">
+                    {editingProduct ? '정보 수정하기' : '신규 상품 등록하기'}
+                  </button>
                 </div>
-              </div>
-
-              <button type="submit" className="btn btn-primary w-full py-2.5 font-bold text-xs mt-2">
-                {editingProduct ? '정보 수정하기' : '신규 상품 등록하기'}
-              </button>
-            </form>
+              </form>
+            </div>
           </div>
         </div>
       )}
@@ -2933,3 +2976,4 @@ export default function AdminDashboard() {
     </div>
   );
 }
+
