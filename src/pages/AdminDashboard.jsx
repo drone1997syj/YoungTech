@@ -2082,7 +2082,6 @@ export default function AdminDashboard() {
                         <h4 className="font-bold text-dark text-sm">전체 카테고리</h4>
                         <p className="text-xs text-light mt-1">드래그로 순서를 바꾸고 하위 카테고리를 관리할 수 있습니다.</p>
                       </div>
-                      <span className="text-2xs text-light font-bold">? {localCategories.length}?</span>
                     </div>
 
                     <div className="admin-category-tree">
