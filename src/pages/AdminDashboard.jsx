@@ -1408,15 +1408,15 @@ export default function AdminDashboard() {
                     <div className="grid grid-cols-3 gap-4">
                       <div className="card p-4 flex flex-col justify-between" style={{ backgroundColor: '#f8fafc', borderLeft: '4px solid #8b5cf6' }}>
                         <span className="text-2xs text-light font-bold">총 상품</span>
-                        <span className="text-lg font-black text-dark mt-1">{products.length} <span className="text-xs font-normal text-light">?</span></span>
+                        <span className="text-lg font-black text-dark mt-1">{products.length} <span className="text-xs font-normal text-light">개</span></span>
                       </div>
                       <div className="card p-4 flex flex-col justify-between" style={{ backgroundColor: '#f8fafc', borderLeft: '4px solid #10b981' }}>
                         <span className="text-2xs text-light font-bold">판매중 상품</span>
-                        <span className="text-lg font-black text-green-600 mt-1">{products.filter(p => p.stock > 0).length} <span className="text-xs font-normal text-light">?</span></span>
+                        <span className="text-lg font-black text-green-600 mt-1">{products.filter(p => p.stock > 0).length} <span className="text-xs font-normal text-light">개</span></span>
                       </div>
                       <div className="card p-4 flex flex-col justify-between" style={{ backgroundColor: '#f8fafc', borderLeft: '4px solid #f59e0b' }}>
                         <span className="text-2xs text-light font-bold">품절 상품</span>
-                        <span className="text-lg font-black text-amber-600 mt-1">{products.filter(p => p.stock === 0).length} <span className="text-xs font-normal text-light">?</span></span>
+                        <span className="text-lg font-black text-amber-600 mt-1">{products.filter(p => p.stock === 0).length} <span className="text-xs font-normal text-light">개</span></span>
                       </div>
                     </div>
 
