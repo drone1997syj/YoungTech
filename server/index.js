@@ -2110,6 +2110,10 @@ function parseBooleanFlag(value, fallback = true) {
   return true;
 }
 
+function generateProductId() {
+  return `product_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+}
+
 function parseCsv(text) {
   const rows = [];
   let row = [];
@@ -2171,8 +2175,8 @@ function mapCsvProducts(buffer) {
 
 app.post('/api/products', requireAdmin, async (req, res) => {
   const { id, name, category, price, image, description, specs, stock, brand, is_active } = req.body;
-  if (!id || !name || !category || !price) {
-    return res.status(400).json({ message: '필수 상품 정보(ID, 상품명, 카테고리, 가격)를 입력해 주세요.' });
+  if (!name || !category || !price) {
+    return res.status(400).json({ message: '필수 상품 정보(상품명, 카테고리, 가격)를 입력해 주세요.' });
   }
 
   const priceWarning = await validateProductPrice(Number(price), category);
@@ -2181,11 +2185,26 @@ app.post('/api/products', requireAdmin, async (req, res) => {
   }
 
   try {
-    const [existing] = await pool.query('SELECT id, is_deleted FROM products WHERE id = ?', [id]);
+    const providedId = String(id || '').trim();
+    let productId = providedId;
+
+    if (!productId) {
+      let generatedId = generateProductId();
+      while (true) {
+        const [existingGenerated] = await pool.query('SELECT id FROM products WHERE id = ?', [generatedId]);
+        if (existingGenerated.length === 0) {
+          productId = generatedId;
+          break;
+        }
+        generatedId = generateProductId();
+      }
+    }
+
+    const [existing] = await pool.query('SELECT id, is_deleted FROM products WHERE id = ?', [productId]);
     if (existing.length > 0) {
       if (existing[0].is_deleted) {
         return res.status(409).json({
-          message: '삭제 처리된 상품 ID입니다. 주문 보존을 위해 같은 ID를 다시 사용할 수 없습니다. 새 상품 ID를 사용해 주세요.'
+          message: '삭제 처리된 상품 ID입니다. 주문 보존을 위해 같은 ID를 다시 사용할 수 없습니다. 새로운 상품 ID를 사용해 주세요.'
         });
       }
       return res.status(400).json({ message: '이미 존재하는 상품 ID입니다.' });
@@ -2193,16 +2212,15 @@ app.post('/api/products', requireAdmin, async (req, res) => {
 
     await pool.query(
       'INSERT INTO products (id, name, category, brand, price, image, description, specs, stock, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [id, name, category, normalizeBrand(brand), price, image, description, JSON.stringify(specs || {}), stock || 50, parseBooleanFlag(is_active, true)]
+      [productId, name, category, normalizeBrand(brand), price, image, description, JSON.stringify(specs || {}), stock || 50, parseBooleanFlag(is_active, true)]
     );
 
-    res.status(201).json({ message: '상품이 성공적으로 등록되었습니다.' });
+    res.status(201).json({ message: '상품이 성공적으로 등록되었습니다.', id: productId });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: '서버 오류가 발생했습니다.' });
   }
 });
-
 app.put('/api/products/:id', requireAdmin, async (req, res) => {
   const { name, category, price, image, description, specs, stock, brand, is_active } = req.body;
   const productId = req.params.id;

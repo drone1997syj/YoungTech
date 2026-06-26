@@ -116,6 +116,7 @@ export const ShopProvider = ({ children }) => {
     const token = localStorage.getItem('yt_token');
     const headers = {
       'Content-Type': 'application/json',
+      Accept: 'application/json',
       ...options.headers
     };
     if (token) {
@@ -126,13 +127,35 @@ export const ShopProvider = ({ children }) => {
       headers
     });
     
-    const data = await response.json();
+    const rawText = await response.text();
+    const contentType = response.headers.get('content-type') || '';
+    let data = null;
+
+    if (rawText) {
+      const trimmed = rawText.trim();
+      if (contentType.includes('application/json') || trimmed.startsWith('{') || trimmed.startsWith('[')) {
+        try {
+          data = JSON.parse(rawText);
+        } catch (error) {
+          data = rawText;
+        }
+      } else {
+        data = rawText;
+      }
+    }
+
     if (!response.ok) {
+      const fallbackMessage = typeof data === 'string'
+        ? data.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200)
+        : null;
       throw {
-        ...data,
-        message: data.message || '요청 처리에 실패했습니다.',
+        ...(data && typeof data === 'object' ? data : {}),
+        message: data && typeof data === 'object' && data.message
+          ? data.message
+          : fallbackMessage || '?붿껌 泥섎━???ㅽ뙣?덉뒿?덈떎.',
         status: response.status,
-        isWarning: data.isWarning
+        isWarning: data && typeof data === 'object' ? data.isWarning : undefined,
+        rawResponse: rawText
       };
     }
     return data;

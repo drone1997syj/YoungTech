@@ -385,6 +385,18 @@ export default function AdminDashboard() {
     };
   };
 
+  const getProductSubcategoryOptions = (parentCategoryId) => {
+    const normalizedParentId = String(parentCategoryId || '');
+    return [...localCategories]
+      .filter((cat) => normalizeCategoryParentId(cat.parent_id) === normalizedParentId)
+      .sort((a, b) => {
+        const aOrder = Number(a.sort_order || 0);
+        const bOrder = Number(b.sort_order || 0);
+        if (aOrder !== bOrder) return aOrder - bOrder;
+        return String(a.name || '').localeCompare(String(b.name || ''), 'ko');
+      });
+  };
+
   const markCategoryDirty = () => {
     setCategoryDirty(true);
     setCatSuccess('');
@@ -588,7 +600,11 @@ export default function AdminDashboard() {
 
       setCategoryDeletedIds([]);
       setCategoryDirty(false);
-      await fetchProducts(true);
+      try {
+        await fetchProducts(true);
+      } catch (refreshError) {
+        console.warn('Failed to refresh products after category save:', refreshError);
+      }
       setCatSuccess('품목 변경사항을 저장했습니다.');
     } catch (err) {
       setCatError(err.message || '품목 저장 중 오류가 발생했습니다.');
@@ -784,7 +800,11 @@ export default function AdminDashboard() {
         throw new Error(data.message || 'CSV 업로드에 실패했습니다.');
       }
       alert(`CSV 등록 완료: ${data.inserted}개 추가, ${data.skipped}개 중복 제외`);
-      await fetchProducts(true);
+      try {
+        await fetchProducts(true);
+      } catch (refreshError) {
+        console.warn('Failed to refresh products after category save:', refreshError);
+      }
     } catch (err) {
       console.error(err);
       alert(err.message || 'CSV 업로드 중 오류가 발생했습니다.');
@@ -980,8 +1000,8 @@ export default function AdminDashboard() {
     e.preventDefault();
     setFormError('');
 
-    if (!prodForm.id || !prodForm.name || !prodForm.price) {
-      setFormError('상품 ID, 이름, 가격은 필수 입력 사항입니다.');
+    if (!prodForm.name || !prodForm.price) {
+      setFormError('상품명, 가격은 필수 입력 사항입니다.');
       return;
     }
 
@@ -992,20 +1012,17 @@ export default function AdminDashboard() {
     }
 
     const finalCategory = prodForm.sub_category || prodForm.category;
-    const finalProductId = editingProduct
-      ? prodForm.id
-      : (prodForm.id || `product-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`);
 
     // Front-end Price Anomaly Detection (10x check)
     // Find other products in the same category
-    const sameCatProds = products.filter(p => p.category === finalCategory && p.id !== finalProductId);
+    const sameCatProds = products.filter(p => p.category === finalCategory && (!editingProduct || p.id !== prodForm.id));
     if (sameCatProds.length > 0 && !priceConfirmed) {
       const sum = sameCatProds.reduce((acc, curr) => acc + curr.price, 0);
       const avg = sum / sameCatProds.length;
 
       if (priceNum > avg * 10 || priceNum < avg / 10) {
         const confirmResult = window.confirm(
-          `⚠️ [가격 오입력 경고]\n\n입력하신 가격(${priceNum.toLocaleString()}원)은 해당 카테고리 평균 가격(${Math.round(avg).toLocaleString()}원) 대비 10배 이상 현격한 차이가 있습니다.\n\n정말로 이 가격으로 등록하시겠습니까?`
+          `⚠️ [가격 입력 경고]\n\n입력하신 가격 ${priceNum.toLocaleString()}원은 해당 카테고리 평균 가격 ${Math.round(avg).toLocaleString()}원 대비 10배 이상 차이가 있습니다.\n\n정말 이 가격으로 등록하시겠습니까?`
         );
         if (!confirmResult) {
           return;
@@ -1017,7 +1034,7 @@ export default function AdminDashboard() {
     // Merge images array to a single comma-separated string for DB storage
     const submitData = {
       ...prodForm,
-      id: finalProductId,
+      ...(editingProduct ? { id: prodForm.id } : {}),
       category: finalCategory,
       is_active: true,
       image: prodForm.images.join(',')
@@ -2622,7 +2639,7 @@ export default function AdminDashboard() {
                         onChange={(e) => setProdForm({...prodForm, sub_category: e.target.value})}
                       >
                         <option value="">선택 안 함</option>
-                        {getCategoryChildren(prodForm.category).map((cat) => (
+                        {getProductSubcategoryOptions(prodForm.category).map((cat) => (
                           <option key={cat.id} value={cat.id}>{cat.name}</option>
                         ))}
                       </select>
