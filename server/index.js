@@ -2110,8 +2110,22 @@ function parseBooleanFlag(value, fallback = true) {
   return true;
 }
 
-function generateProductId() {
-  return `product_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+function slugifyProductName(name) {
+  const text = String(name || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '-')
+    .replace(/[^0-9a-z가-힣-]+/g, '')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '');
+
+  return text || 'product';
+}
+
+function generateProductId(name) {
+  const slug = slugifyProductName(name);
+  const suffix = crypto.randomBytes(3).toString('hex');
+  return `${slug}-${suffix}`;
 }
 
 function parseCsv(text) {
@@ -2189,14 +2203,14 @@ app.post('/api/products', requireAdmin, async (req, res) => {
     let productId = providedId;
 
     if (!productId) {
-      let generatedId = generateProductId();
+      let generatedId = generateProductId(name);
       while (true) {
         const [existingGenerated] = await pool.query('SELECT id FROM products WHERE id = ?', [generatedId]);
         if (existingGenerated.length === 0) {
           productId = generatedId;
           break;
         }
-        generatedId = generateProductId();
+        generatedId = generateProductId(name);
       }
     }
 
