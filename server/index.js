@@ -206,6 +206,72 @@ const deriveOrderStatusFromItems = (items, fallbackStatus = 'pending') => {
   return fallbackStatus;
 };
 
+const parseJsonMaybe = (value, fallback = null) => {
+  if (value === null || value === undefined || value === '') return fallback;
+  if (typeof value !== 'string') return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return fallback;
+  }
+};
+
+const serializeCartItemRow = (row) => ({
+  id: row.id,
+  name: row.name,
+  category: row.category,
+  price: row.price,
+  image: row.image,
+  description: row.description,
+  specs: parseJsonMaybe(row.specs, row.specs || null),
+  stock: row.stock,
+  brand: row.brand,
+  is_active: Boolean(row.is_active),
+  quantity: row.quantity
+});
+
+const fetchCartItemsForUser = async (connection, userId) => {
+  const [rows] = await connection.query(`
+    SELECT
+      p.id,
+      p.name,
+      p.category,
+      p.price,
+      p.image,
+      p.description,
+      p.specs,
+      p.stock,
+      p.brand,
+      p.is_active,
+      ci.quantity
+    FROM cart_items ci
+    JOIN products p ON p.id = ci.product_id
+    WHERE ci.user_id = ? AND p.is_deleted = FALSE
+    ORDER BY ci.updated_at DESC, ci.id DESC
+  `, [userId]);
+
+  return rows.map(serializeCartItemRow);
+};
+
+const fetchCartCountForUser = async (connection, userId) => {
+  const [rows] = await connection.query(
+    `SELECT COALESCE(SUM(ci.quantity), 0) AS count
+     FROM cart_items ci
+     JOIN products p ON p.id = ci.product_id
+     WHERE ci.user_id = ? AND p.is_deleted = FALSE`,
+    [userId]
+  );
+  return Number(rows[0]?.count || 0);
+};
+
+const fetchActiveProductById = async (connection, productId) => {
+  const [rows] = await connection.query(
+    'SELECT id FROM products WHERE id = ? AND is_deleted = FALSE',
+    [productId]
+  );
+  return rows[0] || null;
+};
+
 // ==========================================
 // JWT Middleware
 // ==========================================
@@ -2367,6 +2433,166 @@ app.post('/api/products/batch-out-of-stock', requireAdmin, async (req, res) => {
 // ==========================================
 // Orders APIs
 // ==========================================
+// ==========================================
+// Cart APIs
+// ==========================================
+app.get('/api/cart/count', authenticateToken, async (req, res) => {
+  try {
+    const count = await fetchCartCountForUser(pool, req.user.id);
+    res.json({ count });
+  } catch (error) {
+    console.error('Fetch Cart Count Error:', error);
+    res.status(500).json({ message: '장바구니 개수를 불러오지 못했습니다.' });
+  }
+});
+
+app.get('/api/cart', authenticateToken, async (req, res) => {
+  try {
+    const cartItems = await fetchCartItemsForUser(pool, req.user.id);
+    res.json({
+      cartItems,
+      count: cartItems.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0)
+    });
+  } catch (error) {
+    console.error('Fetch Cart Error:', error);
+    res.status(500).json({ message: '장바구니를 불러오지 못했습니다.' });
+  }
+});
+
+app.post('/api/cart/items', authenticateToken, async (req, res) => {
+  const { productId, quantity = 1 } = req.body || {};
+  const normalizedQuantity = Math.max(1, Number(quantity) || 1);
+
+  if (!productId) {
+    return res.status(400).json({ message: '상품 ID가 필요합니다.' });
+  }
+
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    const product = await fetchActiveProductById(connection, productId);
+    if (!product) {
+      await connection.rollback();
+      return res.status(404).json({ message: '상품을 찾을 수 없습니다.' });
+    }
+
+    const [existingRows] = await connection.query(
+      'SELECT quantity FROM cart_items WHERE user_id = ? AND product_id = ? FOR UPDATE',
+      [req.user.id, productId]
+    );
+
+    const nextQuantity = (existingRows[0]?.quantity || 0) + normalizedQuantity;
+    if (existingRows.length > 0) {
+      await connection.query(
+        'UPDATE cart_items SET quantity = ?, updated_at = NOW() WHERE user_id = ? AND product_id = ?',
+        [nextQuantity, req.user.id, productId]
+      );
+    } else {
+      await connection.query(
+        'INSERT INTO cart_items (user_id, product_id, quantity) VALUES (?, ?, ?)',
+        [req.user.id, productId, nextQuantity]
+      );
+    }
+
+    const cartItems = await fetchCartItemsForUser(connection, req.user.id);
+    await connection.commit();
+    res.json({
+      success: true,
+      cartItems,
+      count: cartItems.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0)
+    });
+  } catch (error) {
+    await connection.rollback();
+    console.error('Add Cart Item Error:', error);
+    res.status(500).json({ message: '장바구니 저장 중 오류가 발생했습니다.' });
+  } finally {
+    connection.release();
+  }
+});
+
+app.patch('/api/cart/items/:productId', authenticateToken, async (req, res) => {
+  const { quantity } = req.body || {};
+  const nextQuantity = Number(quantity);
+
+  if (!Number.isFinite(nextQuantity)) {
+    return res.status(400).json({ message: '수량이 올바르지 않습니다.' });
+  }
+
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    if (nextQuantity <= 0) {
+      await connection.query(
+        'DELETE FROM cart_items WHERE user_id = ? AND product_id = ?',
+        [req.user.id, req.params.productId]
+      );
+    } else {
+      const product = await fetchActiveProductById(connection, req.params.productId);
+      if (!product) {
+        await connection.rollback();
+        return res.status(404).json({ message: '상품을 찾을 수 없습니다.' });
+      }
+
+      await connection.query(
+        `INSERT INTO cart_items (user_id, product_id, quantity)
+         VALUES (?, ?, ?)
+         ON DUPLICATE KEY UPDATE quantity = VALUES(quantity), updated_at = NOW()`,
+        [req.user.id, req.params.productId, Math.max(1, Math.floor(nextQuantity))]
+      );
+    }
+
+    const cartItems = await fetchCartItemsForUser(connection, req.user.id);
+    await connection.commit();
+    res.json({
+      success: true,
+      cartItems,
+      count: cartItems.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0)
+    });
+  } catch (error) {
+    await connection.rollback();
+    console.error('Update Cart Item Error:', error);
+    res.status(500).json({ message: '장바구니 수량 변경 중 오류가 발생했습니다.' });
+  } finally {
+    connection.release();
+  }
+});
+
+app.delete('/api/cart/items/:productId', authenticateToken, async (req, res) => {
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    await connection.query(
+      'DELETE FROM cart_items WHERE user_id = ? AND product_id = ?',
+      [req.user.id, req.params.productId]
+    );
+    const cartItems = await fetchCartItemsForUser(connection, req.user.id);
+    await connection.commit();
+    res.json({
+      success: true,
+      cartItems,
+      count: cartItems.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0)
+    });
+  } catch (error) {
+    await connection.rollback();
+    console.error('Delete Cart Item Error:', error);
+    res.status(500).json({ message: '장바구니 상품 삭제 중 오류가 발생했습니다.' });
+  } finally {
+    connection.release();
+  }
+});
+
+app.delete('/api/cart/clear', authenticateToken, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM cart_items WHERE user_id = ?', [req.user.id]);
+    res.json({ success: true, cartItems: [], count: 0 });
+  } catch (error) {
+    console.error('Clear Cart Error:', error);
+    res.status(500).json({ message: '장바구니를 비우는 중 오류가 발생했습니다.' });
+  }
+});
+
 app.post('/api/orders', authenticateToken, async (req, res) => {
   const {
     total_amount,

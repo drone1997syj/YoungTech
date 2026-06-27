@@ -388,6 +388,29 @@ export async function initDb() {
     }
     console.log('Claims table checked/created/updated.');
 
+    // 8. cart_items table
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS cart_items (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id VARCHAR(100) NOT NULL,
+        product_id VARCHAR(100) NOT NULL,
+        quantity INT NOT NULL DEFAULT 1,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_cart_items_user_product (user_id, product_id)
+      )
+    `);
+
+    const [cartColumns] = await connection.query(`SHOW COLUMNS FROM cart_items`);
+    const cartColumnNames = cartColumns.map(col => col.Field);
+    if (!cartColumnNames.includes('created_at')) {
+      await connection.query(`ALTER TABLE cart_items ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP AFTER quantity`);
+    }
+    if (!cartColumnNames.includes('updated_at')) {
+      await connection.query(`ALTER TABLE cart_items ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at`);
+    }
+    console.log('Cart items table checked/created/updated.');
+
     // 8. Social login account-link verification and history
     await connection.query(`
       CREATE TABLE IF NOT EXISTS social_link_verifications (
