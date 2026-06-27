@@ -26,6 +26,14 @@ const loginIpBuckets = new Map();
 
 app.use(cors());
 app.use(express.json());
+// Keep compatibility with frontend calls that still include /api/*.
+app.use((req, res, next) => {
+  const rewrittenUrl = req.url.replace(/^\/api(?=\/|\?|$)/, '');
+  if (rewrittenUrl !== req.url) {
+    req.url = rewrittenUrl || '/';
+  }
+  next();
+});
 
 // Normalize www -> apex so one domain is enough to connect and share.
 app.use((req, res, next) => {
@@ -92,6 +100,8 @@ const getPublicBaseUrl = (req) => {
 
   return 'http://localhost:5000';
 };
+
+const getCanonicalFrontendBaseUrl = (req) => getPublicBaseUrl(req).replace(/\/$/, '');
 
 const isMailConfigured = () => Boolean(
   process.env.SMTP_HOST &&
@@ -206,6 +216,31 @@ const deriveOrderStatusFromItems = (items, fallbackStatus = 'pending') => {
   return fallbackStatus;
 };
 
+// ==========================================
+// JWT Middleware
+// ==========================================
+function authenticateToken(req, res, next) {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+
+  if (!token) return res.status(401).json({ message: '인증 토큰이 누락되었습니다.' });
+
+  jwt.verify(token, JWT_SECRET, (err, user) => {
+    if (err) return res.status(403).json({ message: '유효하지 않거나 만료된 토큰입니다.' });
+    req.user = user;
+    next();
+  });
+}
+
+function requireAdmin(req, res, next) {
+  authenticateToken(req, res, () => {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ message: '관리자 권한이 필요합니다.' });
+    }
+    next();
+  });
+}
+
 const parseJsonMaybe = (value, fallback = null) => {
   if (value === null || value === undefined || value === '') return fallback;
   if (typeof value !== 'string') return value;
@@ -266,43 +301,147 @@ const fetchCartCountForUser = async (connection, userId) => {
 
 const fetchActiveProductById = async (connection, productId) => {
   const [rows] = await connection.query(
-    'SELECT id FROM products WHERE id = ? AND is_deleted = FALSE',
+    'SELECT id, name, category, price, image, description, specs, stock, brand, is_active FROM products WHERE id = ? AND is_deleted = FALSE',
     [productId]
   );
   return rows[0] || null;
 };
 
-// ==========================================
-// JWT Middleware
-// ==========================================
-function authenticateToken(req, res, next) {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
+const AUTH_PROVIDER = {
+  LOCAL: 'local',
+  NAVER: 'naver',
+  KAKAO: 'kakao',
+  GOOGLE: 'google'
+};
 
-  if (!token) return res.status(401).json({ message: '인증 토큰이 누락되었습니다.' });
+const normalizeEmailAddress = (email) => String(email || '').trim().toLowerCase();
 
-  jwt.verify(token, JWT_SECRET, (err, user) => {
-    if (err) return res.status(403).json({ message: '유효하지 않거나 만료된 토큰입니다.' });
-    req.user = user;
-    next();
-  });
-}
+const mergeUserRecord = (userRow, identityRows = [], profileRow = null) => {
+  if (!userRow) return null;
 
-function requireAdmin(req, res, next) {
-  authenticateToken(req, res, () => {
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ message: '관리자 권한이 필요합니다.' });
+  const merged = {
+    ...userRow,
+    auth_password_hash: null,
+    phone: profileRow?.phone ?? userRow.phone ?? '',
+    address: profileRow?.address ?? userRow.address ?? ''
+  };
+
+  for (const identity of identityRows) {
+    if (identity.provider === AUTH_PROVIDER.LOCAL) {
+      merged.auth_password_hash = identity.password_hash || null;
+      continue;
     }
-    next();
-  });
-}
+    if (identity.provider === AUTH_PROVIDER.NAVER) merged.naver_id = identity.provider_user_id;
+    if (identity.provider === AUTH_PROVIDER.KAKAO) merged.kakao_id = identity.provider_user_id;
+    if (identity.provider === AUTH_PROVIDER.GOOGLE) merged.google_id = identity.provider_user_id;
+  }
+
+  return merged;
+};
+
+const getMergedUserById = async (userId) => {
+  const [userRows] = await pool.query('SELECT * FROM users WHERE id = ?', [userId]);
+  if (userRows.length === 0) return null;
+  const [identityRows] = await pool.query('SELECT * FROM user_auth_identities WHERE user_id = ?', [userId]);
+  const [profileRows] = await pool.query('SELECT * FROM user_private_profiles WHERE user_id = ?', [userId]);
+  return mergeUserRecord(userRows[0], identityRows, profileRows[0] || null);
+};
+
+const getMergedUserByEmail = async (email) => {
+  const normalizedEmail = normalizeEmailAddress(email);
+  if (!normalizedEmail) return null;
+
+  const [userRows] = await pool.query('SELECT * FROM users WHERE email = ?', [normalizedEmail]);
+  if (userRows.length === 0) return null;
+
+  const user = userRows[0];
+  const [identityRows] = await pool.query('SELECT * FROM user_auth_identities WHERE user_id = ?', [user.id]);
+  const [profileRows] = await pool.query('SELECT * FROM user_private_profiles WHERE user_id = ?', [user.id]);
+  return mergeUserRecord(user, identityRows, profileRows[0] || null);
+};
+
+const getUserBySocialIdentity = async (provider, providerUserId) => {
+  const normalizedProviderUserId = String(providerUserId || '');
+  const [userRows] = await pool.query(
+    `SELECT u.*
+     FROM user_auth_identities ai
+     JOIN users u ON u.id = ai.user_id
+     WHERE ai.provider = ? AND ai.provider_user_id = ?
+     LIMIT 1`,
+    [provider, normalizedProviderUserId]
+  );
+
+  if (userRows.length > 0) {
+    return getMergedUserById(userRows[0].id);
+  }
+
+  const legacyColumn = `${provider}_id`;
+  const [legacyRows] = await pool.query(`SELECT * FROM users WHERE ${legacyColumn} = ? LIMIT 1`, [normalizedProviderUserId]);
+  if (legacyRows.length === 0) return null;
+  return getMergedUserById(legacyRows[0].id);
+};
+
+const upsertLocalAuthIdentity = async (executor, userId, email, passwordHash) => {
+  await executor.query(
+    `INSERT INTO user_auth_identities (user_id, provider, provider_user_id, password_hash)
+     VALUES (?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE
+       provider_user_id = VALUES(provider_user_id),
+       password_hash = VALUES(password_hash)`,
+    [userId, AUTH_PROVIDER.LOCAL, normalizeEmailAddress(email), passwordHash]
+  );
+
+  await executor.query('UPDATE users SET password = ? WHERE id = ?', [passwordHash, userId]);
+};
+
+const upsertSocialAuthIdentity = async (executor, userId, provider, providerUserId) => {
+  const normalizedProviderUserId = String(providerUserId || '');
+  await executor.query(
+    `INSERT INTO user_auth_identities (user_id, provider, provider_user_id)
+     VALUES (?, ?, ?)
+     ON DUPLICATE KEY UPDATE provider_user_id = VALUES(provider_user_id)`,
+    [userId, provider, normalizedProviderUserId]
+  );
+
+  const columnName = `${provider}_id`;
+  await executor.query(`UPDATE users SET ${columnName} = ? WHERE id = ?`, [normalizedProviderUserId, userId]);
+};
+
+const upsertPrivateProfile = async (executor, userId, phone, address) => {
+  const normalizedPhone = phone === undefined ? undefined : String(phone || '').replace(/\D/g, '');
+  const normalizedAddress = address === undefined ? undefined : String(address || '').trim();
+
+  await executor.query(
+    `INSERT INTO user_private_profiles (user_id, phone, address)
+     VALUES (?, ?, ?)
+     ON DUPLICATE KEY UPDATE
+       phone = COALESCE(VALUES(phone), phone),
+       address = COALESCE(VALUES(address), address)`,
+    [userId, normalizedPhone ?? null, normalizedAddress ?? null]
+  );
+
+  const updates = [];
+  const params = [];
+  if (normalizedPhone !== undefined) {
+    updates.push('phone = ?');
+    params.push(normalizedPhone);
+  }
+  if (normalizedAddress !== undefined) {
+    updates.push('address = ?');
+    params.push(normalizedAddress);
+  }
+  if (updates.length > 0) {
+    params.push(userId);
+    await executor.query(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`, params);
+  }
+};
 
 // ==========================================
 // Authentication APIs
 // ==========================================
-app.post('/api/auth/register', async (req, res, next) => {
+app.post('/auth/register', async (req, res, next) => {
   const { email, password, name, phone } = req.body;
-  const normalizedEmail = String(email || '').trim().toLowerCase();
+  const normalizedEmail = normalizeEmailAddress(email);
   const normalizedName = String(name || '').trim();
   const normalizedPhone = String(phone || '').replace(/\D/g, '');
   const storedPhone = normalizedPhone || '';
@@ -321,9 +460,8 @@ app.post('/api/auth/register', async (req, res, next) => {
   }
 
   try {
-    const [existing] = await pool.query('SELECT * FROM users WHERE email = ?', [normalizedEmail]);
-    if (existing.length > 0) {
-      const existingUser = existing[0];
+    const existingUser = await getMergedUserByEmail(normalizedEmail);
+    if (existingUser) {
       const hasSocialLogin = Boolean(existingUser.naver_id || existingUser.kakao_id || existingUser.google_id);
       return res.status(400).json({
         message: hasSocialLogin
@@ -365,7 +503,7 @@ app.post('/api/auth/register', async (req, res, next) => {
   }
 });
 
-app.post('/api/auth/register/verify', async (req, res) => {
+app.post('/auth/register/verify', async (req, res) => {
   const { verificationId, code } = req.body;
   const normalizedCode = String(code || '').replace(/\D/g, '');
 
@@ -403,18 +541,30 @@ app.post('/api/auth/register/verify', async (req, res) => {
       });
     }
 
-    const [existing] = await pool.query('SELECT id FROM users WHERE email = ?', [verification.email]);
-    if (existing.length > 0) {
+    const existingUser = await getMergedUserByEmail(verification.email);
+    if (existingUser) {
       await pool.query('UPDATE signup_email_verifications SET completed_at = NOW() WHERE id = ?', [verificationId]);
       return res.status(409).json({ message: '이미 가입된 이메일입니다. 로그인 또는 비밀번호 찾기를 이용해 주세요.' });
     }
 
     const userId = `user_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
-    await pool.query(
-      'INSERT INTO users (id, email, password, name, phone, role) VALUES (?, ?, ?, ?, ?, ?)',
-      [userId, verification.email, verification.password_hash, verification.name, verification.phone, 'user']
-    );
-    await pool.query('UPDATE signup_email_verifications SET completed_at = NOW() WHERE id = ?', [verificationId]);
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      await connection.query(
+        'INSERT INTO users (id, email, password, name, phone, role) VALUES (?, ?, ?, ?, ?, ?)',
+        [userId, verification.email, verification.password_hash, verification.name, verification.phone, 'user']
+      );
+      await upsertLocalAuthIdentity(connection, userId, verification.email, verification.password_hash);
+      await upsertPrivateProfile(connection, userId, verification.phone || '', '');
+      await connection.query('UPDATE signup_email_verifications SET completed_at = NOW() WHERE id = ?', [verificationId]);
+      await connection.commit();
+    } catch (transactionError) {
+      await connection.rollback();
+      throw transactionError;
+    } finally {
+      connection.release();
+    }
 
     return res.status(201).json({ message: '이메일 인증이 완료되어 회원가입이 완료되었습니다.' });
   } catch (error) {
@@ -423,7 +573,7 @@ app.post('/api/auth/register/verify', async (req, res) => {
   }
 });
 
-app.post('/api/auth/register', async (req, res) => {
+app.post('/auth/register', async (req, res) => {
   const { email, password, name, phone } = req.body;
   const normalizedPhone = String(phone || '').replace(/\D/g, '');
   const storedPhone = normalizedPhone || '';
@@ -476,12 +626,10 @@ app.post('/api/auth/login', async (req, res) => {
   }
 
   try {
-    const [rows] = await pool.query('SELECT * FROM users WHERE email = ?', [email]);
-    if (rows.length === 0) {
+    const user = await getMergedUserByEmail(email);
+    if (!user) {
       return res.status(400).json({ message: '가입되지 않은 이메일이거나 비밀번호가 다릅니다.' });
     }
-
-    const user = rows[0];
     const limit = getLoginLimitForRole(user.role);
     const lockedUntil = user.locked_until ? new Date(user.locked_until) : null;
 
@@ -503,7 +651,8 @@ app.post('/api/auth/login', async (req, res) => {
       user.login_failed_count = 0;
     }
 
-    const passwordMatch = bcrypt.compareSync(password, user.password);
+    const passwordHash = user.auth_password_hash || user.password;
+    const passwordMatch = passwordHash ? bcrypt.compareSync(password, passwordHash) : false;
     if (!passwordMatch) {
       const failedCount = Number(user.login_failed_count || 0) + 1;
 
@@ -678,15 +827,15 @@ app.post('/api/auth/find-id', async (req, res) => {
 // 비밀번호 찾기 인증번호 발급 API
 app.post('/api/auth/request-password-reset-code', async (req, res) => {
   const { email } = req.body;
-  const normalizedEmail = String(email || '').trim().toLowerCase();
+  const normalizedEmail = normalizeEmailAddress(email);
 
   if (!normalizedEmail) {
     return res.status(400).json({ message: '이메일을 입력해 주세요.' });
   }
 
   try {
-    const [rows] = await pool.query('SELECT id FROM users WHERE email = ?', [normalizedEmail]);
-    if (rows.length === 0) {
+    const user = await getMergedUserByEmail(normalizedEmail);
+    if (!user) {
       return res.status(404).json({ message: '가입된 이메일을 찾을 수 없습니다.' });
     }
 
@@ -766,7 +915,11 @@ app.post('/api/auth/verify-password-reset-code', async (req, res) => {
     }
 
     const hashedPassword = bcrypt.hashSync(newPassword, 10);
-    await pool.query('UPDATE users SET password = ? WHERE email = ?', [hashedPassword, verification.email]);
+    const user = await getMergedUserByEmail(verification.email);
+    if (!user) {
+      return res.status(404).json({ message: '?ъ슜?먮? 李얠쓣 ???놁뒿?덈떎.' });
+    }
+    await upsertLocalAuthIdentity(pool, user.id, verification.email, hashedPassword);
     await pool.query('UPDATE password_reset_verifications SET completed_at = NOW() WHERE id = ?', [verificationId]);
 
     res.json({
@@ -787,18 +940,18 @@ app.post('/api/auth/reset-password', async (req, res) => {
   }
 
   try {
-    const [rows] = await pool.query('SELECT id FROM users WHERE email = ?', [email.trim()]);
-    if (rows.length === 0) {
+    const user = await getMergedUserByEmail(email.trim());
+    if (!user) {
       return res.status(404).json({ message: '입력하신 정보와 일치하는 가입 정보가 없습니다.' });
     }
 
-    const userId = rows[0].id;
+    const userId = user.id;
     // 8자리 임시 비밀번호 난수 생성
     const tempPassword = createTemporaryPassword();
     const hashedTempPassword = bcrypt.hashSync(tempPassword, 10);
 
     // 비밀번호 업데이트
-    await pool.query('UPDATE users SET password = ? WHERE id = ?', [hashedTempPassword, userId]);
+    await upsertLocalAuthIdentity(pool, userId, email.trim(), hashedTempPassword);
     const mailResult = await sendMail({
       to: email.trim(),
       subject: '[YoungTech] 임시 비밀번호 안내',
@@ -819,11 +972,19 @@ app.post('/api/auth/reset-password', async (req, res) => {
 
 app.get('/api/auth/me', authenticateToken, async (req, res) => {
   try {
-    const [rows] = await pool.query('SELECT id, email, name, role, created_at, phone, address FROM users WHERE id = ?', [req.user.id]);
-    if (rows.length === 0) {
+    const user = await getMergedUserById(req.user.id);
+    if (!user) {
       return res.status(404).json({ message: '사용자를 찾을 수 없습니다.' });
     }
-    res.json(rows[0]);
+    res.json({
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      created_at: user.created_at,
+      phone: user.phone,
+      address: user.address
+    });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: '서버 내부 오류' });
@@ -968,30 +1129,29 @@ app.post('/api/auth/link-social', async (req, res) => {
       return res.status(400).json({ message: '지원하지 않는 간편로그인 제공자입니다.' });
     }
 
-    const [rows] = await pool.query('SELECT * FROM users WHERE email = ?', [payload.email]);
-    if (rows.length === 0) {
+    const user = await getMergedUserByEmail(payload.email);
+    if (!user) {
       return res.status(404).json({ message: '연결할 영테크 계정을 찾을 수 없습니다.' });
     }
-
-    const user = rows[0];
-    const passwordMatch = bcrypt.compareSync(password, user.password);
+    const passwordHash = user.auth_password_hash || user.password;
+    const passwordMatch = passwordHash ? bcrypt.compareSync(password, passwordHash) : false;
     if (!passwordMatch) {
       return res.status(401).json({ message: '영테크 비밀번호가 일치하지 않습니다.' });
     }
 
-    await pool.query(`UPDATE users SET ${config.idColumn} = ? WHERE id = ?`, [payload.providerUserId, user.id]);
+    await upsertSocialAuthIdentity(pool, user.id, payload.provider, payload.providerUserId);
     await pool.query(
       'INSERT INTO social_link_history (user_id, provider, provider_user_id, method, result) VALUES (?, ?, ?, ?, ?)',
       [user.id, payload.provider, payload.providerUserId, 'password', 'linked']
     );
-    const [updatedRows] = await pool.query('SELECT * FROM users WHERE id = ?', [user.id]);
+    const updatedUser = await getMergedUserById(user.id);
     await sendMail({
-      to: updatedRows[0].email,
+      to: updatedUser.email,
       subject: '[YoungTech] 간편로그인 연결 완료 안내',
       text: `${config.label} 간편로그인이 YoungTech 계정에 연결되었습니다.\n\n본인이 연결한 것이 아니라면 즉시 비밀번호를 변경하고 고객센터로 문의해 주세요.`
     });
 
-    return completeSocialLogin(res, updatedRows[0], {
+    return completeSocialLogin(res, updatedUser, {
       linked: true,
       message: `${config.label} 간편로그인이 기존 영테크 계정에 연결되었습니다. 연결 완료 알림이 기존 이메일로 발송되었습니다.`
     });
@@ -1021,12 +1181,10 @@ app.post('/api/auth/link-social-confirm', async (req, res) => {
       return res.status(400).json({ message: '지원하지 않는 간편로그인 제공자입니다.' });
     }
 
-    const [rows] = await pool.query('SELECT * FROM users WHERE email = ?', [payload.email]);
-    if (rows.length === 0) {
+    const user = await getMergedUserByEmail(payload.email);
+    if (!user) {
       return res.status(404).json({ message: '연결할 영테크 계정을 찾을 수 없습니다.' });
     }
-
-    const user = rows[0];
     if (user.role === 'admin') {
       return res.status(403).json({ message: '관리자 계정은 확인만으로 간편로그인을 연결할 수 없습니다. 비밀번호 확인이 필요합니다.' });
     }
@@ -1035,20 +1193,20 @@ app.post('/api/auth/link-social-confirm', async (req, res) => {
       return res.status(409).json({ message: `이미 다른 ${config.label} 계정이 연결되어 있습니다. 이메일 인증을 다시 진행해 주세요.` });
     }
 
-    await pool.query(`UPDATE users SET ${config.idColumn} = ? WHERE id = ?`, [payload.providerUserId, user.id]);
+    await upsertSocialAuthIdentity(pool, user.id, payload.provider, payload.providerUserId);
     await pool.query(
       'INSERT INTO social_link_history (user_id, provider, provider_user_id, method, result) VALUES (?, ?, ?, ?, ?)',
       [user.id, payload.provider, payload.providerUserId, 'confirm', 'linked']
     );
 
-    const [updatedRows] = await pool.query('SELECT * FROM users WHERE id = ?', [user.id]);
+    const updatedUser = await getMergedUserById(user.id);
     await sendMail({
-      to: updatedRows[0].email,
+      to: updatedUser.email,
       subject: '[YoungTech] 간편로그인 연결 완료 안내',
       text: `${config.label} 간편로그인이 YoungTech 계정에 연결되었습니다.\n\n본인이 연결한 것이 아니라면 즉시 비밀번호를 변경하고 고객센터로 문의해 주세요.`
     });
 
-    return completeSocialLogin(res, updatedRows[0], {
+    return completeSocialLogin(res, updatedUser, {
       linked: true,
       message: `${config.label} 간편로그인이 기존 영테크 계정에 연결되었습니다.`
     });
@@ -1105,31 +1263,29 @@ app.post('/api/auth/link-social-email', async (req, res) => {
       });
     }
 
-    const [userRows] = await pool.query('SELECT * FROM users WHERE id = ? AND email = ?', [verification.user_id, verification.email]);
-    if (userRows.length === 0) {
+    const user = await getMergedUserById(verification.user_id);
+    if (!user || user.email !== verification.email) {
       return res.status(404).json({ message: '연결할 영테크 계정을 찾을 수 없습니다.' });
     }
-
-    const user = userRows[0];
     if (user.role === 'admin') {
       return res.status(403).json({ message: '관리자 계정은 이메일 인증만으로 간편로그인을 연결할 수 없습니다.' });
     }
 
-    await pool.query(`UPDATE users SET ${config.idColumn} = ? WHERE id = ?`, [verification.provider_user_id, user.id]);
+    await upsertSocialAuthIdentity(pool, user.id, verification.provider, verification.provider_user_id);
     await pool.query('UPDATE social_link_verifications SET completed_at = NOW() WHERE id = ?', [linkId]);
     await pool.query(
       'INSERT INTO social_link_history (user_id, provider, provider_user_id, method, result) VALUES (?, ?, ?, ?, ?)',
       [user.id, verification.provider, verification.provider_user_id, 'email', 'linked']
     );
 
-    const [updatedRows] = await pool.query('SELECT * FROM users WHERE id = ?', [user.id]);
+    const updatedUser = await getMergedUserById(user.id);
     await sendMail({
-      to: updatedRows[0].email,
+      to: updatedUser.email,
       subject: '[YoungTech] 간편로그인 연결 완료 안내',
       text: `${config.label} 간편로그인이 YoungTech 계정에 연결되었습니다.\n\n본인이 연결한 것이 아니라면 즉시 비밀번호를 변경하고 고객센터로 문의해 주세요.`
     });
 
-    return completeSocialLogin(res, updatedRows[0], {
+    return completeSocialLogin(res, updatedUser, {
       linked: true,
       message: `${config.label} 간편로그인이 기존 영테크 계정에 연결되었습니다. 연결 완료 알림이 기존 이메일로 발송되었습니다.`
     });
@@ -1220,8 +1376,9 @@ app.post('/api/auth/naver', async (req, res) => {
       }
 
       if (isMock && user.email === naverUser.email && String(user.naver_id || '').startsWith('naver_')) {
-        await pool.query('UPDATE users SET naver_id = ? WHERE id = ?', [naverUser.id, user.id]);
-        return completeSocialLogin(res, { ...user, naver_id: naverUser.id }, {
+        await upsertSocialAuthIdentity(pool, user.id, AUTH_PROVIDER.NAVER, naverUser.id);
+        const updatedUser = await getMergedUserById(user.id);
+        return completeSocialLogin(res, updatedUser, {
           linked: false,
           message: '네이버 계정 연결 정보를 최신 상태로 보정하고 로그인했습니다.'
         });
@@ -1242,6 +1399,7 @@ app.post('/api/auth/naver', async (req, res) => {
       'INSERT INTO users (id, naver_id, email, password, name, role) VALUES (?, ?, ?, ?, ?, ?)',
       [tempUserId, naverUser.id, naverUser.email, tempPasswordHash, naverUser.name, 'user']
     );
+    await upsertSocialAuthIdentity(pool, tempUserId, AUTH_PROVIDER.NAVER, naverUser.id);
 
     const token = jwt.sign(
       { id: tempUserId, email: naverUser.email, name: naverUser.name, role: 'user' },
@@ -1270,7 +1428,7 @@ app.post('/api/auth/naver', async (req, res) => {
 
 // Kakao Social Login API
 app.post('/api/auth/kakao', async (req, res) => {
-  const { code, state } = req.body;
+  const { code, state, redirectUri: requestRedirectUri } = req.body;
   if (!code) {
     return res.status(400).json({ message: '인가 코드가 누락되었습니다.' });
   }
@@ -1291,8 +1449,7 @@ app.post('/api/auth/kakao', async (req, res) => {
   } else {
     try {
       const tokenUrl = 'https://kauth.kakao.com/oauth/token';
-      const redirectBaseUrl = (req.headers.origin || process.env.PUBLIC_BASE_URL || getPublicBaseUrl(req)).replace(/\/$/, '');
-      const redirectUri = `${redirectBaseUrl}/oauth/callback/kakao`;
+      const redirectUri = (requestRedirectUri || `${getCanonicalFrontendBaseUrl(req)}/oauth/callback/kakao`).trim();
       
       const params = new URLSearchParams();
       params.append('grant_type', 'authorization_code');
@@ -1383,6 +1540,7 @@ app.post('/api/auth/kakao', async (req, res) => {
       'INSERT INTO users (id, kakao_id, email, password, name, role) VALUES (?, ?, ?, ?, ?, ?)',
       [tempUserId, kakaoUser.id, kakaoUser.email, tempPasswordHash, kakaoUser.name, 'user']
     );
+    await upsertSocialAuthIdentity(pool, tempUserId, AUTH_PROVIDER.KAKAO, kakaoUser.id);
 
     const token = jwt.sign(
       { id: tempUserId, email: kakaoUser.email, name: kakaoUser.name, role: 'user' },
@@ -1409,9 +1567,29 @@ app.post('/api/auth/kakao', async (req, res) => {
   }
 });
 
+app.get('/api/admin/users', requireAdmin, async (_req, res) => {
+  try {
+    const [users] = await pool.query(
+      `SELECT
+         id,
+         email,
+         name,
+         role,
+         created_at
+       FROM users
+       ORDER BY created_at DESC, id DESC`
+    );
+
+    res.json(users);
+  } catch (err) {
+    console.error('Admin Users List Error:', err);
+    res.status(500).json({ message: '회원 목록을 불러오지 못했습니다.' });
+  }
+});
+
 // Google Social Login API
 app.post('/api/auth/google', async (req, res) => {
-  const { code, state, accessToken, credential, allowSignup = false } = req.body;
+  const { code, state, accessToken, credential, allowSignup = false, redirectUri: requestRedirectUri } = req.body;
 
   const clientId = (process.env.GOOGLE_CLIENT_ID || process.env.VITE_GOOGLE_CLIENT_ID || '').trim();
   const clientSecret = (process.env.GOOGLE_CLIENT_SECRET || '').trim();
@@ -1469,7 +1647,7 @@ app.post('/api/auth/google', async (req, res) => {
     try {
       const tokenUrl = 'https://oauth2.googleapis.com/token';
       const reqOrigin = req.headers.origin || `http://${req.headers.host}` || 'http://localhost:5174';
-      const redirectUri = `${reqOrigin}/oauth/callback/google`;
+      const redirectUri = (requestRedirectUri || `${reqOrigin}/oauth/callback/google`).trim();
 
       const params = new URLSearchParams({
         code,
@@ -1568,6 +1746,7 @@ app.post('/api/auth/google', async (req, res) => {
       'INSERT INTO users (id, google_id, email, password, name, role) VALUES (?, ?, ?, ?, ?, ?)',
       [newUserId, googleUser.id, googleUser.email, tempPasswordHash, googleUser.name, 'user']
     );
+    await upsertSocialAuthIdentity(pool, newUserId, AUTH_PROVIDER.GOOGLE, googleUser.id);
 
     const token = jwt.sign(
       { id: newUserId, email: googleUser.email, name: googleUser.name, role: 'user' },
@@ -1603,12 +1782,12 @@ app.put('/api/auth/profile-update', authenticateToken, async (req, res) => {
   }
 
   try {
-    const [rows] = await pool.query('SELECT * FROM users WHERE id = ?', [req.user.id]);
-    if (rows.length === 0) {
+    const user = await getMergedUserById(req.user.id);
+    if (!user) {
       return res.status(404).json({ message: '사용자를 찾을 수 없습니다.' });
     }
 
-    await pool.query('UPDATE users SET phone = ?, address = ? WHERE id = ?', [phone, address, req.user.id]);
+    await upsertPrivateProfile(pool, req.user.id, phone, address);
     res.json({ success: true, message: '배송지 및 연락처 정보 등록이 완료되었습니다.' });
   } catch (error) {
     console.error(error);
@@ -1657,6 +1836,7 @@ app.post('/api/addresses', authenticateToken, async (req, res) => {
     if (is_default) {
       await connection.query('UPDATE user_addresses SET is_default = FALSE WHERE user_id = ?', [req.user.id]);
       await connection.query('UPDATE users SET phone = ?, address = ? WHERE id = ?', [normalizedPhone, base_address, req.user.id]);
+      await upsertPrivateProfile(connection, req.user.id, normalizedPhone, base_address);
     }
     const [result] = await connection.query(
       `INSERT INTO user_addresses
@@ -1711,6 +1891,7 @@ app.put('/api/addresses/:id', authenticateToken, async (req, res) => {
     if (is_default) {
       await connection.query('UPDATE user_addresses SET is_default = FALSE WHERE user_id = ?', [req.user.id]);
       await connection.query('UPDATE users SET phone = ?, address = ? WHERE id = ?', [normalizedPhone, base_address, req.user.id]);
+      await upsertPrivateProfile(connection, req.user.id, normalizedPhone, base_address);
     }
     const [result] = await connection.query(
       `UPDATE user_addresses
@@ -2176,24 +2357,6 @@ function parseBooleanFlag(value, fallback = true) {
   return true;
 }
 
-function slugifyProductName(name) {
-  const text = String(name || '')
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, '-')
-    .replace(/[^0-9a-z가-힣-]+/g, '')
-    .replace(/-+/g, '-')
-    .replace(/^-+|-+$/g, '');
-
-  return text || 'product';
-}
-
-function generateProductId(name) {
-  const slug = slugifyProductName(name);
-  const suffix = crypto.randomBytes(3).toString('hex');
-  return `${slug}-${suffix}`;
-}
-
 function parseCsv(text) {
   const rows = [];
   let row = [];
@@ -2255,8 +2418,8 @@ function mapCsvProducts(buffer) {
 
 app.post('/api/products', requireAdmin, async (req, res) => {
   const { id, name, category, price, image, description, specs, stock, brand, is_active } = req.body;
-  if (!name || !category || !price) {
-    return res.status(400).json({ message: '필수 상품 정보(상품명, 카테고리, 가격)를 입력해 주세요.' });
+  if (!id || !name || !category || !price) {
+    return res.status(400).json({ message: '필수 상품 정보(ID, 상품명, 카테고리, 가격)를 입력해 주세요.' });
   }
 
   const priceWarning = await validateProductPrice(Number(price), category);
@@ -2265,26 +2428,11 @@ app.post('/api/products', requireAdmin, async (req, res) => {
   }
 
   try {
-    const providedId = String(id || '').trim();
-    let productId = providedId;
-
-    if (!productId) {
-      let generatedId = generateProductId(name);
-      while (true) {
-        const [existingGenerated] = await pool.query('SELECT id FROM products WHERE id = ?', [generatedId]);
-        if (existingGenerated.length === 0) {
-          productId = generatedId;
-          break;
-        }
-        generatedId = generateProductId(name);
-      }
-    }
-
-    const [existing] = await pool.query('SELECT id, is_deleted FROM products WHERE id = ?', [productId]);
+    const [existing] = await pool.query('SELECT id, is_deleted FROM products WHERE id = ?', [id]);
     if (existing.length > 0) {
       if (existing[0].is_deleted) {
         return res.status(409).json({
-          message: '삭제 처리된 상품 ID입니다. 주문 보존을 위해 같은 ID를 다시 사용할 수 없습니다. 새로운 상품 ID를 사용해 주세요.'
+          message: '삭제 처리된 상품 ID입니다. 주문 보존을 위해 같은 ID를 다시 사용할 수 없습니다. 새 상품 ID를 사용해 주세요.'
         });
       }
       return res.status(400).json({ message: '이미 존재하는 상품 ID입니다.' });
@@ -2292,15 +2440,16 @@ app.post('/api/products', requireAdmin, async (req, res) => {
 
     await pool.query(
       'INSERT INTO products (id, name, category, brand, price, image, description, specs, stock, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [productId, name, category, normalizeBrand(brand), price, image, description, JSON.stringify(specs || {}), stock || 50, parseBooleanFlag(is_active, true)]
+      [id, name, category, normalizeBrand(brand), price, image, description, JSON.stringify(specs || {}), stock || 50, parseBooleanFlag(is_active, true)]
     );
 
-    res.status(201).json({ message: '상품이 성공적으로 등록되었습니다.', id: productId });
+    res.status(201).json({ message: '상품이 성공적으로 등록되었습니다.' });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: '서버 오류가 발생했습니다.' });
   }
 });
+
 app.put('/api/products/:id', requireAdmin, async (req, res) => {
   const { name, category, price, image, description, specs, stock, brand, is_active } = req.body;
   const productId = req.params.id;
@@ -2431,9 +2580,6 @@ app.post('/api/products/batch-out-of-stock', requireAdmin, async (req, res) => {
 });
 
 // ==========================================
-// Orders APIs
-// ==========================================
-// ==========================================
 // Cart APIs
 // ==========================================
 app.get('/api/cart/count', authenticateToken, async (req, res) => {
@@ -2442,17 +2588,14 @@ app.get('/api/cart/count', authenticateToken, async (req, res) => {
     res.json({ count });
   } catch (error) {
     console.error('Fetch Cart Count Error:', error);
-    res.status(500).json({ message: '장바구니 개수를 불러오지 못했습니다.' });
+    res.status(500).json({ message: '?λ컮援щ땲 媛쒖닔瑜?遺덈윭?ㅼ? 紐삵뻽?듬땲??' });
   }
 });
 
 app.get('/api/cart', authenticateToken, async (req, res) => {
   try {
     const cartItems = await fetchCartItemsForUser(pool, req.user.id);
-    res.json({
-      cartItems,
-      count: cartItems.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0)
-    });
+    res.json({ cartItems, count: cartItems.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0) });
   } catch (error) {
     console.error('Fetch Cart Error:', error);
     res.status(500).json({ message: '장바구니를 불러오지 못했습니다.' });
@@ -2497,11 +2640,7 @@ app.post('/api/cart/items', authenticateToken, async (req, res) => {
 
     const cartItems = await fetchCartItemsForUser(connection, req.user.id);
     await connection.commit();
-    res.json({
-      success: true,
-      cartItems,
-      count: cartItems.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0)
-    });
+    res.json({ success: true, cartItems, count: cartItems.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0) });
   } catch (error) {
     await connection.rollback();
     console.error('Add Cart Item Error:', error);
@@ -2545,11 +2684,7 @@ app.patch('/api/cart/items/:productId', authenticateToken, async (req, res) => {
 
     const cartItems = await fetchCartItemsForUser(connection, req.user.id);
     await connection.commit();
-    res.json({
-      success: true,
-      cartItems,
-      count: cartItems.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0)
-    });
+    res.json({ success: true, cartItems, count: cartItems.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0) });
   } catch (error) {
     await connection.rollback();
     console.error('Update Cart Item Error:', error);
@@ -2569,11 +2704,7 @@ app.delete('/api/cart/items/:productId', authenticateToken, async (req, res) => 
     );
     const cartItems = await fetchCartItemsForUser(connection, req.user.id);
     await connection.commit();
-    res.json({
-      success: true,
-      cartItems,
-      count: cartItems.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0)
-    });
+    res.json({ success: true, cartItems, count: cartItems.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0) });
   } catch (error) {
     await connection.rollback();
     console.error('Delete Cart Item Error:', error);
@@ -2593,6 +2724,9 @@ app.delete('/api/cart/clear', authenticateToken, async (req, res) => {
   }
 });
 
+// ==========================================
+// Orders APIs
+// ==========================================
 app.post('/api/orders', authenticateToken, async (req, res) => {
   const {
     total_amount,
@@ -2660,6 +2794,8 @@ app.post('/api/orders', authenticateToken, async (req, res) => {
       INSERT INTO analytics (date, revenue, visitors) VALUES (?, ?, 1)
       ON DUPLICATE KEY UPDATE revenue = revenue + VALUES(revenue)
     `, [todayString, total_amount]);
+
+    await connection.query('DELETE FROM cart_items WHERE user_id = ?', [req.user.id]);
 
     await connection.commit();
     res.json({ message: '주문이 접수되었습니다.', orderId });
@@ -2747,21 +2883,19 @@ app.post('/api/admin/users/:id/detail', requireAdmin, async (req, res) => {
   }
 
   try {
-    const [adminRows] = await pool.query('SELECT password FROM users WHERE id = ? AND role = ?', [req.user.id, 'admin']);
-    if (adminRows.length === 0) {
+    const adminUser = await getMergedUserById(req.user.id);
+    if (!adminUser || adminUser.role !== 'admin') {
       return res.status(403).json({ message: '관리자 계정을 확인할 수 없습니다.' });
     }
 
-    const passwordMatch = bcrypt.compareSync(password, adminRows[0].password);
+    const adminPasswordHash = adminUser.auth_password_hash || adminUser.password;
+    const passwordMatch = adminPasswordHash ? bcrypt.compareSync(password, adminPasswordHash) : false;
     if (!passwordMatch) {
       return res.status(401).json({ message: '관리자 비밀번호가 일치하지 않습니다.' });
     }
 
-    const [userRows] = await pool.query(
-      'SELECT id, email, name, phone, address, role, created_at FROM users WHERE id = ?',
-      [req.params.id]
-    );
-    if (userRows.length === 0) {
+    const user = await getMergedUserById(req.params.id);
+    if (!user) {
       return res.status(404).json({ message: '고객 정보를 찾을 수 없습니다.' });
     }
 
@@ -2789,7 +2923,15 @@ app.post('/api/admin/users/:id/detail', requireAdmin, async (req, res) => {
     const totalSpent = parsedOrders.reduce((sum, order) => sum + Number(order.total_amount || 0), 0);
 
     res.json({
-      user: userRows[0],
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        phone: user.phone,
+        address: user.address,
+        role: user.role,
+        created_at: user.created_at
+      },
       summary: {
         order_count: parsedOrders.length,
         total_spent: totalSpent,
@@ -3703,7 +3845,7 @@ app.use(async (req, res, next) => {
 // Start Server
 // ==========================================
 initDb().then(() => {
-  app.listen(PORT, () => {
+  const startServer = () => {
     console.log(`Backend Server running on port ${PORT}`);
 
     // ② 10일 경과 발송 주문 자동 배송완료 처리 (API 호출 없음)
@@ -3743,15 +3885,15 @@ initDb().then(() => {
           await connection.beginTransaction();
 
           // 1. 기존 유저 조회
-          const [userRows] = await connection.query('SELECT * FROM users WHERE id = ?', [userId]);
-          if (userRows.length === 0) {
+          const user = await getMergedUserById(userId);
+          if (!user) {
             await connection.rollback();
             return res.status(404).json({ message: '사용자를 찾을 수 없습니다.' });
           }
 
           // 2. 정보 업데이트 쿼리 동적 생성
           let updateQuery = 'UPDATE users SET name = ?';
-          let updateParams = [name || userRows[0].name];
+          let updateParams = [name || user.name];
 
           if (phone !== undefined) {
             const normalizedPhone = String(phone || '').replace(/\D/g, '');
@@ -3759,27 +3901,24 @@ initDb().then(() => {
               await connection.rollback();
               return res.status(400).json({ message: '휴대폰 번호를 올바르게 입력해 주세요. 예: 010-1234-5678' });
             }
-            updateQuery += ', phone = ?';
-            updateParams.push(normalizedPhone);
+            await upsertPrivateProfile(connection, userId, normalizedPhone, undefined);
           }
 
           if (password && password.trim() !== '') {
             const passwordError = validatePasswordPolicy(password, {
-              email: userRows[0].email,
-              name: name || userRows[0].name
+              email: user.email,
+              name: name || user.name
             });
             if (passwordError) {
               await connection.rollback();
               return res.status(400).json({ message: passwordError });
             }
             const hashedPassword = await bcrypt.hash(password, 10);
-            updateQuery += ', password = ?';
-            updateParams.push(hashedPassword);
+            await upsertLocalAuthIdentity(connection, userId, user.email, hashedPassword);
           }
 
           if (address !== undefined) {
-            updateQuery += ', address = ?';
-            updateParams.push(address);
+            await upsertPrivateProfile(connection, userId, undefined, address);
           }
 
           updateQuery += ' WHERE id = ?';
@@ -3789,8 +3928,8 @@ initDb().then(() => {
           await connection.commit();
 
           // 3. 갱신된 회원 정보 반환
-          const [updatedUser] = await pool.query('SELECT id, email, name, phone, role, address, created_at FROM users WHERE id = ?', [userId]);
-          res.json({ success: true, message: '회원 정보가 수정되었습니다.', user: updatedUser[0] });
+          const updatedUser = await getMergedUserById(userId);
+          res.json({ success: true, message: '회원 정보가 수정되었습니다.', user: updatedUser });
         } catch (err) {
           await connection.rollback();
           throw err;
@@ -3813,19 +3952,19 @@ initDb().then(() => {
       }
 
       try {
-        const [rows] = await pool.query('SELECT password FROM users WHERE id = ?', [userId]);
-        if (rows.length === 0) {
+        const user = await getMergedUserById(userId);
+        if (!user) {
           return res.status(404).json({ message: '사용자를 찾을 수 없습니다.' });
         }
 
-        const user = rows[0];
         
         // 간편 로그인 회원의 경우 password가 비어있으므로 검증 생략
-        if (!user.password) {
+        const passwordHash = user.auth_password_hash || user.password;
+        if (!passwordHash) {
           return res.json({ success: true, isSocial: true });
         }
 
-        const passwordMatch = bcrypt.compareSync(password, user.password);
+        const passwordMatch = bcrypt.compareSync(password, passwordHash);
         if (!passwordMatch) {
           return res.status(400).json({ message: '비밀번호가 일치하지 않습니다.' });
         }
@@ -3886,7 +4025,16 @@ initDb().then(() => {
       });
       console.log('Serving static frontend from dist/');
     }
-  });
+  };
+
+  if (process.env.VERCEL !== '1') {
+    app.listen(PORT, startServer);
+  } else {
+    startServer();
+  }
 }).catch(err => {
   console.error('Failed to initialize server due to Database error.', err);
 });
+
+export { app };
+export default app;

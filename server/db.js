@@ -46,7 +46,7 @@ export async function initDb() {
         kakao_id VARCHAR(255) UNIQUE,
         google_id VARCHAR(255) UNIQUE,
         email VARCHAR(150) UNIQUE NOT NULL,
-        password VARCHAR(255) NOT NULL,
+        password VARCHAR(255) DEFAULT NULL,
         name VARCHAR(100) NOT NULL,
         phone VARCHAR(50),
         address TEXT,
@@ -124,6 +124,84 @@ export async function initDb() {
     } catch (err) {}
 
     try {
+      await connection.query(`
+        ALTER TABLE users MODIFY COLUMN password VARCHAR(255) DEFAULT NULL
+      `);
+      console.log('Successfully checked/updated password column nullability.');
+    } catch (err) {}
+
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS user_auth_identities (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        user_id VARCHAR(100) NOT NULL,
+        provider VARCHAR(50) NOT NULL,
+        provider_user_id VARCHAR(255) DEFAULT NULL,
+        password_hash VARCHAR(255) DEFAULT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_user_provider (user_id, provider),
+        UNIQUE KEY uq_provider_user (provider, provider_user_id)
+      ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS user_private_profiles (
+        user_id VARCHAR(100) PRIMARY KEY,
+        phone VARCHAR(50) DEFAULT NULL,
+        address TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
+    await connection.query(`
+      INSERT INTO user_auth_identities (user_id, provider, provider_user_id, password_hash)
+      SELECT id, 'local', email, password
+      FROM users
+      WHERE email IS NOT NULL AND password IS NOT NULL AND password <> ''
+      ON DUPLICATE KEY UPDATE
+        provider_user_id = VALUES(provider_user_id),
+        password_hash = VALUES(password_hash)
+    `);
+
+    await connection.query(`
+      INSERT INTO user_auth_identities (user_id, provider, provider_user_id)
+      SELECT id, 'naver', naver_id
+      FROM users
+      WHERE naver_id IS NOT NULL AND naver_id <> ''
+      ON DUPLICATE KEY UPDATE
+        provider_user_id = VALUES(provider_user_id)
+    `);
+
+    await connection.query(`
+      INSERT INTO user_auth_identities (user_id, provider, provider_user_id)
+      SELECT id, 'kakao', kakao_id
+      FROM users
+      WHERE kakao_id IS NOT NULL AND kakao_id <> ''
+      ON DUPLICATE KEY UPDATE
+        provider_user_id = VALUES(provider_user_id)
+    `);
+
+    await connection.query(`
+      INSERT INTO user_auth_identities (user_id, provider, provider_user_id)
+      SELECT id, 'google', google_id
+      FROM users
+      WHERE google_id IS NOT NULL AND google_id <> ''
+      ON DUPLICATE KEY UPDATE
+        provider_user_id = VALUES(provider_user_id)
+    `);
+
+    await connection.query(`
+      INSERT INTO user_private_profiles (user_id, phone, address)
+      SELECT id, phone, address
+      FROM users
+      WHERE (phone IS NOT NULL AND phone <> '') OR (address IS NOT NULL AND address <> '')
+      ON DUPLICATE KEY UPDATE
+        phone = VALUES(phone),
+        address = VALUES(address)
+    `);
+
+    try {
       const [targetRows] = await connection.query('SELECT id FROM users WHERE email = ?', ['drone1997@naver.com']);
       if (targetRows.length === 0) {
         await connection.query(
@@ -161,6 +239,11 @@ export async function initDb() {
     } catch (err) {}
 
     try {
+      await connection.query(`ALTER TABLE categories ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at`);
+      console.log('Successfully checked/added updated_at column to categories.');
+    } catch (err) {}
+
+    try {
       await connection.query(`ALTER TABLE categories ADD COLUMN parent_id VARCHAR(100) DEFAULT NULL AFTER name`);
       console.log('Successfully checked/added parent_id column to categories.');
     } catch (err) {}
@@ -177,6 +260,25 @@ export async function initDb() {
         ('motion', '볼스크류/LM', 5)
       `);
       console.log('Categories seeded.');
+    }
+
+    const [motorChildRows] = await connection.query(
+      'SELECT COUNT(*) as count FROM categories WHERE parent_id = ?',
+      ['motor']
+    );
+    if (motorChildRows[0].count === 0) {
+      await connection.query(`
+        INSERT INTO categories (id, name, parent_id, sort_order) VALUES
+        ('panasonic', '파나소닉', 'motor', 1),
+        ('inovance', '이노밴스', 'motor', 2),
+        ('mitsubishi', '미쓰비시', 'motor', 3),
+        ('nidec', '니덱', 'motor', 4),
+        ('nikki-denso', '니키덴소', 'motor', 5),
+        ('moons', '문스', 'motor', 6),
+        ('rs-automation', 'RS오토메이션', 'motor', 7),
+        ('none', '없음', 'motor', 8)
+      `);
+      console.log('Motor subcategories seeded.');
     }
 
     // 2. products table
@@ -273,7 +375,20 @@ export async function initDb() {
       )
     `);
 
-    // 4. analytics table
+    // 4. cart_items table
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS cart_items (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        user_id VARCHAR(100) NOT NULL,
+        product_id VARCHAR(100) NOT NULL,
+        quantity INT NOT NULL DEFAULT 1,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_cart_items_user_product (user_id, product_id)
+      ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
+    // 5. analytics table
     await connection.query(`
       CREATE TABLE IF NOT EXISTS analytics (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -283,7 +398,7 @@ export async function initDb() {
       )
     `);
 
-    // 5. reviews table
+    // 6. reviews table
     await connection.query(`
       CREATE TABLE IF NOT EXISTS reviews (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -296,7 +411,7 @@ export async function initDb() {
       )
     `);
 
-    // 6. qna table
+    // 7. qna table
     await connection.query(`
       CREATE TABLE IF NOT EXISTS qna (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -310,6 +425,20 @@ export async function initDb() {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
+
+    try {
+      await connection.query(`ALTER TABLE cart_items ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at`);
+      console.log('Successfully checked/added updated_at column to cart_items.');
+    } catch (err) {}
+
+    try {
+      await connection.query(`ALTER TABLE cart_items ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP AFTER quantity`);
+      console.log('Successfully checked/added created_at column to cart_items.');
+    } catch (err) {}
+
+    await ensureIndex(connection, 'cart_items', 'idx_cart_items_user_product', '`user_id`, `product_id`');
+    await ensureIndex(connection, 'cart_items', 'idx_cart_items_user_updated', '`user_id`, `updated_at`');
+
     // Check and add carrier, tracking_number, confirmed_at columns to orders table if they don't exist
     const [columns] = await connection.query(`SHOW COLUMNS FROM orders`);
     const columnNames = columns.map(col => col.Field);
@@ -387,29 +516,6 @@ export async function initDb() {
       await connection.query(`ALTER TABLE claims ADD COLUMN product_id VARCHAR(100) DEFAULT NULL`);
     }
     console.log('Claims table checked/created/updated.');
-
-    // 8. cart_items table
-    await connection.query(`
-      CREATE TABLE IF NOT EXISTS cart_items (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        user_id VARCHAR(100) NOT NULL,
-        product_id VARCHAR(100) NOT NULL,
-        quantity INT NOT NULL DEFAULT 1,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        UNIQUE KEY uq_cart_items_user_product (user_id, product_id)
-      )
-    `);
-
-    const [cartColumns] = await connection.query(`SHOW COLUMNS FROM cart_items`);
-    const cartColumnNames = cartColumns.map(col => col.Field);
-    if (!cartColumnNames.includes('created_at')) {
-      await connection.query(`ALTER TABLE cart_items ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP AFTER quantity`);
-    }
-    if (!cartColumnNames.includes('updated_at')) {
-      await connection.query(`ALTER TABLE cart_items ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at`);
-    }
-    console.log('Cart items table checked/created/updated.');
 
     // 8. Social login account-link verification and history
     await connection.query(`
