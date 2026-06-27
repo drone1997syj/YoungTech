@@ -26,14 +26,6 @@ const loginIpBuckets = new Map();
 
 app.use(cors());
 app.use(express.json());
-// Keep compatibility with frontend calls that still include /api/*.
-app.use((req, res, next) => {
-  const rewrittenUrl = req.url.replace(/^\/api(?=\/|\?|$)/, '');
-  if (rewrittenUrl !== req.url) {
-    req.url = rewrittenUrl || '/';
-  }
-  next();
-});
 
 // Normalize www -> apex so one domain is enough to connect and share.
 app.use((req, res, next) => {
