@@ -2719,6 +2719,15 @@ app.delete('/api/cart/clear', authenticateToken, async (req, res) => {
 // ==========================================
 // Orders APIs
 // ==========================================
+const MAX_ORDER_QTY_PER_ITEM = 999;
+const FREE_SHIPPING_THRESHOLD = 500000;
+const DEFAULT_SHIPPING_FEE = 3000;
+
+function calculateShippingFee(subtotal) {
+  if (subtotal <= 0) return 0;
+  return subtotal >= FREE_SHIPPING_THRESHOLD ? 0 : DEFAULT_SHIPPING_FEE;
+}
+
 app.post('/api/orders', authenticateToken, async (req, res) => {
   const {
     total_amount,
@@ -2730,8 +2739,8 @@ app.post('/api/orders', authenticateToken, async (req, res) => {
     tax_document_status = 'issued_by_pg',
     tax_note = ''
   } = req.body;
-  if (!total_amount || !order_items || !address) {
-    return res.status(400).json({ message: '주문 정보가 누락되었습니다.' });
+  if (!order_items || !address) {
+    return res.status(400).json({ message: '?? ??? ???????.' });
   }
 
   const normalizedPaymentMethod = payment_method === 'mock_card' ? 'mock_card' : 'mock_card';
@@ -2747,11 +2756,97 @@ app.post('/api/orders', authenticateToken, async (req, res) => {
   try {
     await connection.beginTransaction();
 
-    // Insert Order
-    const itemsWithStatus = order_items.map(item => ({
-      ...item,
-      status: item.status || 'pending'
-    }));
+    if (!Array.isArray(order_items) || order_items.length === 0) {
+      throw new Error('?? ?? ??? ???? ????.');
+    }
+
+    const requestedItems = [];
+    const quantityByProductId = new Map();
+
+    for (const rawItem of order_items) {
+      const productId = String(rawItem?.id ?? rawItem?.productId ?? '').trim();
+      const quantity = Number(rawItem?.quantity);
+
+      if (!productId) {
+        throw new Error('?? ?? ID? ???? ????.');
+      }
+      if (!Number.isInteger(quantity)) {
+        throw new Error(`??? ???? ???: ${productId}`);
+      }
+      if (quantity < 1) {
+        throw new Error(`??? 1? ????? ???: ${productId}`);
+      }
+      if (quantity > MAX_ORDER_QTY_PER_ITEM) {
+        throw new Error(`??? ?? ?? ??? ??????: ${productId}`);
+      }
+
+      const nextQuantity = (quantityByProductId.get(productId) || 0) + quantity;
+      if (nextQuantity > MAX_ORDER_QTY_PER_ITEM) {
+        throw new Error(`??? ?? ?? ??? ??????: ${productId}`);
+      }
+
+      quantityByProductId.set(productId, nextQuantity);
+      if (!requestedItems.includes(productId)) {
+        requestedItems.push(productId);
+      }
+    }
+
+    const [productRows] = await connection.query(
+      `SELECT id, name, price, stock, is_active, is_deleted
+       FROM products
+       WHERE id IN (?)
+       FOR UPDATE`,
+      [requestedItems]
+    );
+    const productMap = new Map(productRows.map(product => [product.id, product]));
+
+    const serverOrderItems = [];
+    let subtotalAmount = 0;
+
+    for (const productId of requestedItems) {
+      const product = productMap.get(productId);
+      if (!product) {
+        throw new Error(`?????? ???? ?? ?????: ${productId}`);
+      }
+      if (product.is_deleted) {
+        throw new Error(`?????? ???? ?? ?????: ${product.name}`);
+      }
+      if (!product.is_active) {
+        throw new Error(`?? ??? ?????: ${product.name}`);
+      }
+
+      const unitPrice = Number(product.price);
+      const quantity = quantityByProductId.get(productId) || 0;
+      const stock = Number(product.stock);
+
+      if (!Number.isFinite(unitPrice) || unitPrice <= 0) {
+        throw new Error(`?? ??? ???? ????: ${product.name}`);
+      }
+      if (!Number.isInteger(quantity) || quantity < 1) {
+        throw new Error(`??? ???? ????: ${product.name}`);
+      }
+      if (!Number.isInteger(stock) || stock < quantity) {
+        throw new Error(`?? ??? ?????: ${product.name}`);
+      }
+
+      const itemSubtotal = unitPrice * quantity;
+      subtotalAmount += itemSubtotal;
+      serverOrderItems.push({
+        id: product.id,
+        name: product.name,
+        price: unitPrice,
+        quantity,
+        subtotal: itemSubtotal,
+        status: 'pending'
+      });
+    }
+
+    const shippingFee = calculateShippingFee(subtotalAmount);
+    const serverTotalAmount = subtotalAmount + shippingFee;
+    const clientTotalAmount = Number(total_amount);
+    if (Number.isFinite(clientTotalAmount) && clientTotalAmount !== serverTotalAmount) {
+      throw new Error('?? ??? ???? ????. ?? ??? ???.');
+    }
 
     await connection.query(
       `INSERT INTO orders
@@ -2760,46 +2855,55 @@ app.post('/api/orders', authenticateToken, async (req, res) => {
       [
         orderId,
         req.user.id,
-        total_amount,
+        serverTotalAmount,
         normalizedPaymentMethod,
         normalizedCardType,
         normalizedTaxType,
         normalizedTaxStatus,
         taxInvoiceRequired,
         tax_note,
-        JSON.stringify(itemsWithStatus),
+        JSON.stringify(serverOrderItems),
         address,
         'pending'
       ]
     );
 
-    // Update stock & Update analytics
-    for (const item of order_items) {
-      await connection.query(
-        'UPDATE products SET stock = GREATEST(stock - ?, 0) WHERE id = ?',
-        [item.quantity, item.id]
+    for (const item of serverOrderItems) {
+      const [stockResult] = await connection.query(
+        'UPDATE products SET stock = stock - ? WHERE id = ? AND stock >= ? AND is_active = TRUE AND is_deleted = FALSE',
+        [item.quantity, item.id, item.quantity]
       );
+      if (!stockResult.affectedRows) {
+        throw new Error(`?? ??? ?????: ${item.name}`);
+      }
     }
 
     const todayString = new Date().toISOString().split('T')[0];
-    await connection.query(`
-      INSERT INTO analytics (date, revenue, visitors) VALUES (?, ?, 1)
-      ON DUPLICATE KEY UPDATE revenue = revenue + VALUES(revenue)
-    `, [todayString, total_amount]);
-
-    await connection.query('DELETE FROM cart_items WHERE user_id = ?', [req.user.id]);
+    await connection.query(
+      `INSERT INTO analytics (date, revenue, visitors) VALUES (?, ?, 1)
+       ON DUPLICATE KEY UPDATE revenue = revenue + VALUES(revenue)`,
+      [todayString, serverTotalAmount]
+    );
 
     await connection.commit();
-    res.json({ message: '주문이 접수되었습니다.', orderId });
+    res.json({
+      message: '??? ???????.',
+      orderId,
+      totalAmount: serverTotalAmount,
+      shippingFee,
+      subtotalAmount,
+      orderItems: serverOrderItems
+    });
   } catch (error) {
     await connection.rollback();
     console.error(error);
-    res.status(500).json({ message: '서버 오류가 발생했습니다.' });
+    const message = error?.message || '?? ??? ??????.';
+    const statusCode = message === '?? ??? ??????.' ? 500 : 400;
+    res.status(statusCode).json({ message });
   } finally {
     connection.release();
   }
 });
-
 app.get('/api/orders', authenticateToken, async (req, res) => {
   try {
     const [rows] = await pool.query(`
