@@ -1,9 +1,23 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import {
+  ArrowLeft,
+  ArrowLeftRight,
+  BadgeCheck,
+  ChevronRight,
+  Clock3,
+  Lock,
+  MessageSquare,
+  Package,
+  ShieldCheck,
+  ShoppingCart,
+  Star,
+  Truck,
+  ZoomIn
+} from 'lucide-react';
 import { useShop } from '../context/ShopContext';
-import { ShoppingCart, ArrowLeftRight, ArrowLeft, ShieldCheck, Star, Lock, MessageSquare } from 'lucide-react';
 import './ProductDetail.css';
 
-const CATEGORY_MAP = {
+const CATEGORY_LABELS = {
   motor: '모터',
   reducer: '감속기',
   robot: '로봇',
@@ -11,440 +25,727 @@ const CATEGORY_MAP = {
   motion: '볼스크류/LM'
 };
 
+const formatCurrency = (value) => `${Number(value || 0).toLocaleString()}원`;
+
+const toImageList = (imageValue) =>
+  String(imageValue || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+const getCategoryLabel = (product, categoryMap) => {
+  if (!product) return '상품';
+  return categoryMap.get(product.category)?.name
+    || CATEGORY_LABELS[product.category]
+    || product.sub_category
+    || product.category
+    || '상품';
+};
+
+function DetailBadge({ children, tone = 'neutral' }) {
+  return <span className={`detail-badge detail-badge-${tone}`}>{children}</span>;
+}
+
+function DetailStat({ label, value, hint, icon }) {
+  return (
+    <div className="detail-stat">
+      <div className="detail-stat-icon">{icon}</div>
+      <div className="detail-stat-copy">
+        <span className="detail-stat-label">{label}</span>
+        <strong className="detail-stat-value">{value}</strong>
+        {hint ? <span className="detail-stat-hint">{hint}</span> : null}
+      </div>
+    </div>
+  );
+}
+
+function TabButton({ active, children, onClick }) {
+  return (
+    <button type="button" className={`detail-tab-btn${active ? ' is-active' : ''}`} onClick={onClick}>
+      {children}
+    </button>
+  );
+}
+
 export default function ProductDetail() {
-  const { 
-    selectedProductId, navigate, addToCart, addToCompare, products, user,
-    fetchReviews, createReview, fetchQnas, createQna, answerQna 
+  const {
+    selectedProductId,
+    navigate,
+    addToCart,
+    addToCompare,
+    products,
+    categories,
+    user,
+    fetchReviews,
+    createReview,
+    fetchQnas,
+    createQna,
+    answerQna
   } = useShop();
 
   const [quantity, setQuantity] = useState(1);
   const [reviews, setReviews] = useState([]);
   const [qnas, setQnas] = useState([]);
   const [activeImgIdx, setActiveImgIdx] = useState(0);
-
-  // Review Form States
+  const [activeTab, setActiveTab] = useState('overview');
   const [rating, setRating] = useState(5);
   const [reviewComment, setReviewComment] = useState('');
-  
-  // Q&A Form States
   const [qnaTitle, setQnaTitle] = useState('');
   const [qnaContent, setQnaContent] = useState('');
   const [qnaSecret, setQnaSecret] = useState(false);
-
-  // Q&A Admin Answer State
   const [adminAnswerMap, setAdminAnswerMap] = useState({});
 
-  const product = products.find(p => p.id === selectedProductId);
+  const product = products.find((item) => item.id === selectedProductId);
+
+  const categoryMap = useMemo(
+    () => new Map((categories || []).map((item) => [item.id, { ...item, parent_id: item.parent_id ?? null }])),
+    [categories]
+  );
+
+  const categoryTrail = useMemo(() => {
+    if (!product) return [];
+
+    const trail = [];
+    const seen = new Set();
+    let current = categoryMap.get(product.category) || null;
+
+    while (current && !seen.has(current.id)) {
+      seen.add(current.id);
+      trail.unshift(current);
+      const parentId = String(current.parent_id || '').trim();
+      current = parentId ? categoryMap.get(parentId) || null : null;
+    }
+
+    return trail;
+  }, [product, categoryMap]);
+
+  const categoryLabel = getCategoryLabel(product, categoryMap);
+  const imageList = useMemo(() => toImageList(product?.image), [product?.image]);
+  const stockCount = Number(product?.stock || 0);
+  const isSoldOut = stockCount <= 0 || product?.is_active === false || product?.is_active === 0;
+  const specsEntries = useMemo(
+    () => Object.entries(product?.specs || {}).filter(([, value]) => value !== null && value !== undefined && String(value).trim() !== ''),
+    [product?.specs]
+  );
+  const summarySpecs = useMemo(() => {
+    const entries = specsEntries.slice(0, 4);
+    if (entries.length > 0) return entries;
+    return [
+      ['브랜드', product?.brand || '등록 정보 없음'],
+      ['카테고리', categoryLabel],
+      ['재고', `${stockCount.toLocaleString()}개`],
+      ['상태', isSoldOut ? '품절' : '판매중']
+    ];
+  }, [specsEntries, product?.brand, categoryLabel, stockCount, isSoldOut]);
 
   const loadReviewsAndQna = async () => {
-    if (selectedProductId) {
-      const rList = await fetchReviews(selectedProductId);
-      setReviews(rList);
-      const qList = await fetchQnas(selectedProductId);
-      setQnas(qList);
+    if (!selectedProductId) {
+      setReviews([]);
+      setQnas([]);
+      return;
+    }
+
+    try {
+      const nextReviews = await fetchReviews(selectedProductId);
+      const nextQnas = await fetchQnas(selectedProductId);
+      setReviews(Array.isArray(nextReviews) ? nextReviews : []);
+      setQnas(Array.isArray(nextQnas) ? nextQnas : []);
+    } catch (error) {
+      console.error('Failed to load product detail discussion data:', error);
+      setReviews([]);
+      setQnas([]);
     }
   };
 
   useEffect(() => {
     loadReviewsAndQna();
-    setActiveImgIdx(0); // Reset main image view
+    setActiveImgIdx(0);
+    setActiveTab('overview');
+    setQuantity(1);
+    setRating(5);
+    setReviewComment('');
+    setQnaTitle('');
+    setQnaContent('');
+    setQnaSecret(false);
+    setAdminAnswerMap({});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedProductId]);
 
   if (!product) {
     return (
-      <div className="container py-12 text-center">
-        <h3 className="font-bold text-dark text-lg mb-4">상품을 찾을 수 없습니다.</h3>
-        <button onClick={() => navigate('productList')} className="btn btn-primary">
-          목록으로 이동
-        </button>
+      <div className="product-detail-page">
+        <div className="container product-detail-empty">
+          <div className="card product-detail-empty-card">
+            <h3>상품을 찾을 수 없습니다.</h3>
+            <p>이동한 상품 정보가 더 이상 존재하지 않거나, 잘못된 경로일 수 있습니다.</p>
+            <button type="button" onClick={() => navigate('productList')} className="btn btn-primary">
+              목록으로 이동
+            </button>
+          </div>
+        </div>
       </div>
     );
   }
 
-  const handleQtyChange = (val) => {
-    if (val < 1) return;
-    setQuantity(val);
+  const handleQtyChange = (nextValue) => {
+    const numeric = Number.isFinite(nextValue) ? nextValue : 1;
+    const upperBound = isSoldOut ? 1 : Math.max(1, stockCount || 1);
+    const clamped = Math.min(upperBound, Math.max(1, numeric));
+    setQuantity(clamped);
   };
 
   const handleAddToCart = () => {
+    if (isSoldOut) {
+      alert('품절 상품입니다.');
+      return;
+    }
     addToCart(product, quantity);
-    alert(`${product.name} ${quantity}개가 장바구니에 담겼습니다.`);
+    alert(`${product.name} ${quantity}개를 장바구니에 담았습니다.`);
+  };
+
+  const handleBuyNow = () => {
+    if (isSoldOut) {
+      alert('품절 상품입니다.');
+      return;
+    }
+    addToCart(product, quantity);
+    navigate('checkout');
   };
 
   const handleCompareClick = () => {
-    const res = addToCompare(product);
-    if (!res.success) {
-      alert(res.message);
-    } else {
-      alert(`${product.name}이(가) 사양 비교 목록에 추가되었습니다.`);
-    }
-  };
-
-  // Submit Review
-  const handleReviewSubmit = async (e) => {
-    e.preventDefault();
-    if (!user) {
-      alert('리뷰를 남기려면 로그인이 필요합니다.');
+    const result = addToCompare(product);
+    if (!result.success) {
+      alert(result.message);
       return;
     }
-    const res = await createReview(product.id, rating, reviewComment);
-    if (res.success) {
-      setReviewComment('');
-      loadReviewsAndQna();
-      alert('리뷰가 성공적으로 등록되었습니다.');
-    } else {
-      alert(res.message);
-    }
+    alert(`${product.name} 상품을 비교 목록에 추가했습니다.`);
   };
 
-  // Submit QnA
-  const handleQnaSubmit = async (e) => {
-    e.preventDefault();
+  const handleOpenInquiry = () => {
+    const chatBtn = document.querySelector('.chat-widget-toggle');
+    if (chatBtn) {
+      chatBtn.click();
+      return;
+    }
+    alert('문의창을 열 수 없습니다. 하단 채팅 버튼을 확인해주세요.');
+  };
+
+  const handleReviewSubmit = async (event) => {
+    event.preventDefault();
+    if (!user) {
+      alert('리뷰를 작성하려면 로그인이 필요합니다.');
+      return;
+    }
+    const result = await createReview(product.id, rating, reviewComment);
+    if (result.success) {
+      setReviewComment('');
+      loadReviewsAndQna();
+      alert('리뷰가 등록되었습니다.');
+      return;
+    }
+    alert(result.message);
+  };
+
+  const handleQnaSubmit = async (event) => {
+    event.preventDefault();
     if (!user) {
       alert('문의를 작성하려면 로그인이 필요합니다.');
       return;
     }
-    if (!qnaTitle || !qnaContent) {
+    if (!qnaTitle.trim() || !qnaContent.trim()) {
       alert('제목과 내용을 모두 입력해주세요.');
       return;
     }
-    const res = await createQna(product.id, qnaTitle, qnaContent, qnaSecret);
-    if (res.success) {
+
+    const result = await createQna(product.id, qnaTitle, qnaContent, qnaSecret);
+    if (result.success) {
       setQnaTitle('');
       setQnaContent('');
       setQnaSecret(false);
       loadReviewsAndQna();
-      alert('문의 사항이 접수되었습니다.');
-    } else {
-      alert(res.message);
-    }
-  };
-
-  // Submit Answer (Admin only)
-  const handleAnswerSubmit = async (qnaId) => {
-    const answer = adminAnswerMap[qnaId];
-    if (!answer) {
-      alert('답변 내용을 입력해 주세요.');
+      alert('문의가 등록되었습니다.');
       return;
     }
-    const res = await answerQna(qnaId, answer);
-    if (res.success) {
-      setAdminAnswerMap(prev => ({ ...prev, [qnaId]: '' }));
-      loadReviewsAndQna();
-      alert('답변이 등록되었습니다.');
-    } else {
-      alert(res.message);
-    }
+    alert(result.message);
   };
 
-  return (
-    <div className="product-detail-page container py-8 animate-fade-in">
-      {/* Back to list Link */}
-      <button 
-        onClick={() => navigate('productList')}
-        className="back-btn flex items-center gap-1 text-sm font-semibold text-light mb-6"
-      >
-        <ArrowLeft size={16} /> 목록으로 돌아가기
-      </button>
+  const handleAnswerSubmit = async (qnaId) => {
+    const answer = adminAnswerMap[qnaId];
+    if (!answer?.trim()) {
+      alert('답변 내용을 입력해주세요.');
+      return;
+    }
 
-      {/* Main Info Box */}
-      <div className="detail-layout grid grid-cols-2 gap-8 card p-8 mb-8">
-        {/* Product Image Gallery */}
-        {(() => {
-          const images = product.image ? product.image.split(',').filter(Boolean) : [];
-          return (
-            <div className="detail-img-gallery flex flex-col gap-3">
-              <div 
-                className="detail-img-box bg-purple-50 rounded-lg overflow-hidden flex items-center justify-center"
-                style={{ height: '350px', position: 'relative' }}
-              >
-                {images.length > 0 ? (
-                  <img 
-                    src={images[activeImgIdx]} 
-                    alt={product.name} 
-                    className="detail-img" 
-                    style={{ width: '100%', height: '100%', objectFit: 'contain' }}
-                  />
-                ) : (
-                  <div className="text-light text-xs">등록된 이미지가 없습니다.</div>
-                )}
-              </div>
-              {images.length > 1 && (
-                <div className="flex gap-2 justify-center flex-wrap">
-                  {images.map((imgUrl, idx) => (
-                    <div 
-                      key={idx}
-                      onClick={() => setActiveImgIdx(idx)}
-                      className={`border rounded overflow-hidden cursor-pointer transition-all ${activeImgIdx === idx ? 'border-primary ring-2 ring-purple-100' : 'border-slate-200 hover:border-slate-400'}`}
-                      style={{ 
-                        width: '60px', 
-                        height: '60px', 
-                        backgroundColor: '#f8fafc', 
-                        display: 'flex', 
-                        alignItems: 'center', 
-                        justifyContent: 'center',
-                        borderRadius: '6px'
-                      }}
-                    >
-                      <img src={imgUrl} alt={`Thumb ${idx + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                    </div>
-                  ))}
+    const result = await answerQna(qnaId, answer);
+    if (result.success) {
+      setAdminAnswerMap((prev) => ({ ...prev, [qnaId]: '' }));
+      loadReviewsAndQna();
+      alert('답변이 등록되었습니다.');
+      return;
+    }
+    alert(result.message);
+  };
+
+  const detailPrice = Number(product.price || 0);
+
+  return (
+    <div className="product-detail-page">
+      <div className="product-detail-topbar" />
+      <div className="container product-detail-shell">
+        <button type="button" className="detail-back-link" onClick={() => navigate('productList')}>
+          <ArrowLeft size={16} />
+          <span>상품 목록으로 돌아가기</span>
+        </button>
+
+        <nav className="detail-breadcrumbs" aria-label="breadcrumb">
+          <button type="button" onClick={() => navigate('home')}>홈</button>
+          <ChevronRight size={14} />
+          <button type="button" onClick={() => navigate('productList')}>전체 상품</button>
+          {categoryTrail.map((node) => (
+            <React.Fragment key={node.id}>
+              <ChevronRight size={14} />
+              <button type="button" onClick={() => navigate('productList')}>{node.name}</button>
+            </React.Fragment>
+          ))}
+          <ChevronRight size={14} />
+          <span>{product.name}</span>
+        </nav>
+
+        <div className="detail-hero-grid">
+          <section className="card detail-gallery-panel">
+            <div className="detail-gallery-main">
+              {imageList.length > 0 ? (
+                <img src={imageList[activeImgIdx]} alt={product.name} className="detail-gallery-image" />
+              ) : (
+                <div className="detail-gallery-empty">
+                  <ZoomIn size={28} />
+                  <span>상품 이미지가 없습니다.</span>
                 </div>
               )}
             </div>
-          );
-        })()}
-
-        {/* Product Order Control */}
-        <div className="detail-order-info flex flex-col justify-between">
-          <div>
-            <span className="product-category-tag text-xs font-bold text-primary block mb-2">
-              {CATEGORY_MAP[product.category] || product.category}
-            </span>
-            <h2 className="detail-title font-extrabold text-dark text-2xl mb-4">{product.name}</h2>
-            <p className="detail-desc text-sm text-light mb-6">{product.description}</p>
-          </div>
-
-          <div className="detail-purchase-box border-t pt-6">
-            <div className="price-row flex justify-between items-center mb-6">
-              <span className="text-sm font-bold text-light">판매 가격</span>
-              <span className="detail-price font-extrabold text-primary text-2xl">
-                {product.price.toLocaleString()} 원
-              </span>
-            </div>
-
-            {/* Qty Counter */}
-            <div className="qty-row flex justify-between items-center mb-6">
-              <span className="text-sm font-bold text-light">수량 선택</span>
-              <div className="qty-counter flex items-center">
-                <button onClick={() => handleQtyChange(quantity - 1)} className="qty-btn">-</button>
-                <input 
-                  type="number" 
-                  value={quantity} 
-                  onChange={(e) => handleQtyChange(parseInt(e.target.value) || 1)}
-                  className="qty-input text-center" 
-                />
-                <button onClick={() => handleQtyChange(quantity + 1)} className="qty-btn">+</button>
+            {imageList.length > 1 ? (
+              <div className="detail-gallery-thumbs">
+                {imageList.map((imageSrc, index) => (
+                  <button
+                    key={`${imageSrc}-${index}`}
+                    type="button"
+                    className={`detail-thumb${activeImgIdx === index ? ' is-active' : ''}`}
+                    onClick={() => setActiveImgIdx(index)}
+                  >
+                    <img src={imageSrc} alt={`${product.name} 썸네일 ${index + 1}`} />
+                  </button>
+                ))}
               </div>
+            ) : null}
+          </section>
+
+          <section className="card detail-summary-panel">
+            <div className="detail-chip-row">
+              <DetailBadge tone="primary">{categoryLabel}</DetailBadge>
+              {product.brand ? <DetailBadge tone="soft">{product.brand}</DetailBadge> : null}
+              <DetailBadge tone={isSoldOut ? 'danger' : 'success'}>{isSoldOut ? '품절' : '판매중'}</DetailBadge>
             </div>
 
-            {/* Action Buttons */}
-            <div className="action-buttons-row flex gap-4">
-              <button 
-                onClick={handleAddToCart}
-                className="btn btn-primary flex-1 py-3 flex items-center justify-center gap-2 font-bold text-sm"
-              >
-                <ShoppingCart size={18} /> 장바구니 담기
-              </button>
-              <button 
-                onClick={handleCompareClick}
-                className="btn btn-secondary py-3 px-4 flex items-center justify-center gap-1 text-sm font-bold"
-                title="사양 비교"
-              >
-                <ArrowLeftRight size={18} /> 사양비교 담기
-              </button>
+            <h1 className="detail-title">{product.name}</h1>
+            <p className="detail-subtitle">
+              {product.description || '상품 상세 설명이 등록되어 있지 않습니다.'}
+            </p>
+
+            <div className="detail-stat-grid">
+              <DetailStat
+                label="판매가"
+                value={formatCurrency(detailPrice)}
+                hint="VAT 별도"
+                icon={<BadgeCheck size={18} />}
+              />
+              <DetailStat
+                label="재고"
+                value={`${stockCount.toLocaleString()}개`}
+                hint={isSoldOut ? '품절 상태' : '구매 가능'}
+                icon={<Package size={18} />}
+              />
+              <DetailStat
+                label="문의"
+                value="상담 가능"
+                hint="채팅/문의 버튼 활용"
+                icon={<MessageSquare size={18} />}
+              />
+              <DetailStat
+                label="배송"
+                value="출고 전 확인"
+                hint="정책에 따라 달라질 수 있음"
+                icon={<Truck size={18} />}
+              />
             </div>
-          </div>
-        </div>
-      </div>
 
-      {/* Product Spec Table Section */}
-      <div className="detail-spec-section card p-8 mb-8">
-        <h3 className="section-title text-dark font-bold text-lg mb-6 border-b pb-3">기술 사양 (Technical Specifications)</h3>
-        <table className="spec-table-detail">
-          <tbody>
-            {product.specs && Object.entries(product.specs).map(([key, val]) => (
-              <tr key={key}>
-                <td className="spec-key-col font-bold text-dark text-sm bg-purple-50">{key}</td>
-                <td className="spec-val-col text-sm text-light">{val}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Reviews Section */}
-      <div className="detail-reviews-section card p-8 mb-8">
-        <h3 className="section-title text-dark font-bold text-lg mb-6 border-b pb-3">고객 리뷰 및 평점 ({reviews.length})</h3>
-        
-        {/* Review list */}
-        <div className="reviews-list flex flex-col gap-4 mb-6">
-          {reviews.length > 0 ? (
-            reviews.map(rev => (
-              <div key={rev.id} className="review-item border-b pb-4">
-                <div className="flex justify-between items-center mb-2">
-                  <span className="text-xs font-bold text-dark">{rev.user_name}</span>
-                  <div className="rating-stars flex gap-0.5 text-yellow-400">
-                    {[...Array(5)].map((_, i) => (
-                      <Star key={i} size={12} fill={i < rev.rating ? 'currentColor' : 'none'} />
-                    ))}
-                  </div>
+            <div className="detail-summary-cards">
+              {summarySpecs.map(([key, value]) => (
+                <div className="detail-summary-card" key={key}>
+                  <span>{key}</span>
+                  <strong>{String(value)}</strong>
                 </div>
-                <p className="text-xs text-light">{rev.comment}</p>
-                <span className="text-3xs text-light block mt-1">{new Date(rev.created_at).toLocaleDateString()}</span>
+              ))}
+            </div>
+
+            <div className="detail-info-row">
+              <div className="detail-info-item">
+                <ShieldCheck size={18} />
+                <span>정품 및 사양 확인 후 구매를 안내합니다.</span>
               </div>
-            ))
-          ) : (
-            <p className="text-xs text-light py-4 text-center">작성된 리뷰가 없습니다. 첫 리뷰를 작성해 보세요!</p>
-          )}
+              <div className="detail-info-item">
+                <Clock3 size={18} />
+                <span>주문 후 출고 일정은 재고와 상황에 따라 달라질 수 있습니다.</span>
+              </div>
+            </div>
+          </section>
+
+          <aside className="card detail-purchase-panel">
+            <div className="detail-purchase-box">
+              <span className="detail-purchase-label">판매가</span>
+              <strong className="detail-purchase-price">{formatCurrency(detailPrice)}</strong>
+              <span className="detail-purchase-note">(VAT 별도)</span>
+            </div>
+
+            <div className="detail-qty-block">
+              <span className="detail-purchase-label">수량</span>
+              <div className="detail-qty-stepper">
+                <button type="button" onClick={() => handleQtyChange(quantity - 1)} className="detail-qty-btn">
+                  -
+                </button>
+                <input
+                  type="number"
+                  min={1}
+                  max={stockCount > 0 ? stockCount : undefined}
+                  value={quantity}
+                  onChange={(event) => handleQtyChange(Number(event.target.value))}
+                  className="detail-qty-input"
+                />
+                <button type="button" onClick={() => handleQtyChange(quantity + 1)} className="detail-qty-btn">
+                  +
+                </button>
+              </div>
+            </div>
+
+            <div className="detail-action-stack">
+              <button
+                type="button"
+                className="detail-buy-btn"
+                onClick={handleBuyNow}
+                disabled={isSoldOut}
+              >
+                <ShoppingCart size={18} />
+                <span>{isSoldOut ? '품절' : '구매하기'}</span>
+              </button>
+              <button type="button" className="detail-inquiry-btn" onClick={handleOpenInquiry}>
+                <MessageSquare size={18} />
+                <span>문의하기</span>
+              </button>
+            </div>
+
+            <button
+              type="button"
+              className="detail-ghost-link"
+              onClick={handleAddToCart}
+              disabled={isSoldOut}
+            >
+              장바구니 담기
+            </button>
+
+            <button
+              type="button"
+              className="detail-ghost-link detail-ghost-link-soft"
+              onClick={handleCompareClick}
+            >
+              <ArrowLeftRight size={16} />
+              비교하기
+            </button>
+
+            <div className="detail-benefit-list">
+              <div className="detail-benefit-item">
+                <BadgeCheck size={16} />
+                <span>결제 전 가격과 재고를 다시 확인합니다.</span>
+              </div>
+              <div className="detail-benefit-item">
+                <Truck size={16} />
+                <span>배송 및 출고 일정은 관리자가 별도 안내할 수 있습니다.</span>
+              </div>
+              <div className="detail-benefit-item">
+                <Lock size={16} />
+                <span>문의 내용은 비공개로 작성할 수 있습니다.</span>
+              </div>
+            </div>
+          </aside>
         </div>
 
-        {/* Review Form */}
-        {user ? (
-          <form onSubmit={handleReviewSubmit} className="review-form bg-slate-50 p-4 rounded border">
-            <h4 className="text-xs font-bold mb-3">리뷰 작성하기</h4>
-            <div className="flex gap-4 items-center mb-3">
-              <label className="text-2xs text-light font-bold">평점 선택:</label>
-              <select 
-                value={rating} 
-                onChange={(e) => setRating(Number(e.target.value))}
-                className="form-select text-2xs p-1 border rounded"
-              >
-                <option value={5}>⭐⭐⭐⭐⭐ (5점)</option>
-                <option value={4}>⭐⭐⭐⭐ (4점)</option>
-                <option value={3}>⭐⭐⭐ (3점)</option>
-                <option value={2}>⭐⭐ (2점)</option>
-                <option value={1}>⭐ (1점)</option>
-              </select>
-            </div>
-            <textarea 
-              className="form-input text-xs h-20 resize-none mb-3"
-              placeholder="리뷰 내용을 입력하세요..."
-              value={reviewComment}
-              onChange={(e) => setReviewComment(e.target.value)}
-              required
-            />
-            <button type="submit" className="btn btn-primary text-xs font-bold py-2 px-4">리뷰 등록</button>
-          </form>
-        ) : (
-          <div className="text-center p-4 bg-slate-50 border rounded text-xs text-light">
-            리뷰를 남기시려면 로그인이 필요합니다.
+        <section className="card detail-content-panel">
+          <div className="detail-tabs">
+            <TabButton active={activeTab === 'overview'} onClick={() => setActiveTab('overview')}>상세 설명</TabButton>
+            <TabButton active={activeTab === 'specs'} onClick={() => setActiveTab('specs')}>사양</TabButton>
+            <TabButton active={activeTab === 'shipping'} onClick={() => setActiveTab('shipping')}>배송안내</TabButton>
           </div>
-        )}
-      </div>
 
-      {/* Q&A Section */}
-      <div className="detail-qna-section card p-8 mb-8">
-        <h3 className="section-title text-dark font-bold text-lg mb-6 border-b pb-3">상품 문의 Q&A ({qnas.length})</h3>
-
-        {/* Q&A List */}
-        <div className="qna-list flex flex-col gap-4 mb-6">
-          {qnas.length > 0 ? (
-            qnas.map(q => {
-              const canRead = !q.is_secret || (user && (user.id === q.user_id || user.role === 'admin'));
-              return (
-                <div key={q.id} className="qna-item border-b pb-4">
-                  <div className="flex justify-between items-center mb-1">
-                    <div className="flex items-center gap-1.5">
-                      {q.is_secret && <Lock size={12} className="text-light" />}
-                      <span className="text-xs font-bold text-dark">
-                        {canRead ? q.title : '비밀글입니다.'}
-                      </span>
-                    </div>
-                    <span className="text-3xs text-light">{q.user_name} | {new Date(q.created_at).toLocaleDateString()}</span>
-                  </div>
-
-                  {canRead ? (
-                    <div className="qna-body pl-4 border-l-2 border-purple-200 mt-2">
-                      <p className="text-xs text-light">{q.content}</p>
-                      
-                      {q.answer ? (
-                        <div className="qna-answer bg-slate-50 p-3 rounded mt-3 text-xs">
-                          <span className="font-bold text-primary block mb-1">↳ 관리자 답변:</span>
-                          <p className="text-dark">{q.answer}</p>
-                        </div>
-                      ) : (
-                        user && user.role === 'admin' && (
-                          <div className="qna-answer-form mt-4">
-                            <textarea
-                              className="form-input text-2xs h-16 resize-none mb-2"
-                              placeholder="관리자 답변을 작성하세요..."
-                              value={adminAnswerMap[q.id] || ''}
-                              onChange={(e) => setAdminAnswerMap({
-                                ...adminAnswerMap,
-                                [q.id]: e.target.value
-                              })}
-                            />
-                            <button 
-                              onClick={() => handleAnswerSubmit(q.id)}
-                              className="btn btn-primary text-2xs font-bold py-1.5 px-3"
-                            >
-                              답변 등록
-                            </button>
-                          </div>
-                        )
-                      )}
-                    </div>
+          {activeTab === 'overview' && (
+            <div className="detail-overview-grid">
+              <div className="detail-overview-copy">
+                <h3>{product.name}</h3>
+                <p>
+                  {product.description || '이 상품의 상세 설명이 아직 준비되지 않았습니다. 관리자가 등록한 사양과 이미지가 있으면 이 영역에 제품의 핵심 정보를 한눈에 확인할 수 있습니다.'}
+                </p>
+                <div className="detail-tag-row">
+                  {categoryTrail.length > 0 ? (
+                    categoryTrail.map((node) => <DetailBadge key={node.id} tone="soft">{node.name}</DetailBadge>)
                   ) : (
-                    <p className="text-xs text-light pl-4 italic">비밀글 설정을 통해 작성자 본인 및 관리자만 조회 가능합니다.</p>
+                    <DetailBadge tone="soft">{categoryLabel}</DetailBadge>
                   )}
                 </div>
-              );
-            })
-          ) : (
-            <p className="text-xs text-light py-4 text-center">작성된 문의가 없습니다.</p>
-          )}
-        </div>
+              </div>
 
-        {/* Q&A Write Form */}
-        {user ? (
-          <form onSubmit={handleQnaSubmit} className="qna-form bg-slate-50 p-4 rounded border flex flex-col gap-3">
-            <h4 className="text-xs font-bold">문의 작성하기</h4>
-            <div className="flex gap-4 items-center">
-              <input 
-                type="text" 
-                className="form-input text-xs flex-1"
-                placeholder="문의 제목을 입력하세요..."
-                value={qnaTitle}
-                onChange={(e) => setQnaTitle(e.target.value)}
-                required
-              />
-              <label className="flex items-center gap-1 text-xs text-light cursor-pointer">
-                <input 
-                  type="checkbox" 
-                  checked={qnaSecret} 
-                  onChange={(e) => setQnaSecret(e.target.checked)} 
-                  className="accent-primary"
-                />
-                비밀글 설정
-              </label>
+              <div className="detail-overview-highlights">
+                <div className="detail-highlight-card">
+                  <ShieldCheck size={20} />
+                  <div>
+                    <strong>고효율 설계</strong>
+                    <span>제품 사양과 재고를 서버 기준으로 확인해 안전하게 주문합니다.</span>
+                  </div>
+                </div>
+                <div className="detail-highlight-card">
+                  <Package size={20} />
+                  <div>
+                    <strong>컴팩트 구성</strong>
+                    <span>현장 적용을 고려한 간결한 정보 배치로 빠르게 비교할 수 있습니다.</span>
+                  </div>
+                </div>
+                <div className="detail-highlight-card">
+                  <Truck size={20} />
+                  <div>
+                    <strong>배송 안내</strong>
+                    <span>출고 가능 여부와 납기는 주문 후 다시 확인될 수 있습니다.</span>
+                  </div>
+                </div>
+              </div>
             </div>
-            <textarea 
-              className="form-input text-xs h-24 resize-none"
-              placeholder="상세 문의 내용을 작성해 주세요..."
-              value={qnaContent}
-              onChange={(e) => setQnaContent(e.target.value)}
-              required
-            />
-            <button type="submit" className="btn btn-primary text-xs font-bold py-2 w-28">문의 등록</button>
-          </form>
-        ) : (
-          <div className="text-center p-4 bg-slate-50 border rounded text-xs text-light">
-            문의를 남기시려면 로그인이 필요합니다.
-          </div>
-        )}
-      </div>
+          )}
 
-      {/* Warranty / Consultation banner */}
-      <div className="detail-consult-banner card p-6 bg-indigo-950 text-white flex justify-between items-center">
-        <div className="flex items-center gap-4">
-          <div className="banner-icon-bg bg-primary p-3 rounded-full flex items-center justify-center">
-            <ShieldCheck size={28} className="text-white" />
-          </div>
-          <div>
-            <h4 className="font-bold text-base mb-1">영테크 안심 보증 및 기술 상담 서비스</h4>
-            <p className="text-xs text-slate-300">구입일로부터 1년 무상 품질보증 제공. 해당 모델의 2D/3D CAD 도면 및 상세 기술자료가 필요하신가요?</p>
-          </div>
+          {activeTab === 'specs' && (
+            <div className="detail-specs-area">
+              <table className="detail-spec-table">
+                <tbody>
+                  {specsEntries.length > 0 ? (
+                    specsEntries.map(([key, value]) => (
+                      <tr key={key}>
+                        <th>{key}</th>
+                        <td>{String(value)}</td>
+                      </tr>
+                    ))
+                  ) : (
+                    summarySpecs.map(([key, value]) => (
+                      <tr key={key}>
+                        <th>{key}</th>
+                        <td>{String(value)}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {activeTab === 'shipping' && (
+            <div className="detail-shipping-area">
+              <div className="detail-shipping-card">
+                <Truck size={22} />
+                <div>
+                  <strong>출고</strong>
+                  <p>재고 및 담당자 확인 후 출고 일정을 안내합니다.</p>
+                </div>
+              </div>
+              <div className="detail-shipping-card">
+                <Clock3 size={22} />
+                <div>
+                  <strong>소요 시간</strong>
+                  <p>상품 특성에 따라 즉시 출고 또는 별도 확인이 필요할 수 있습니다.</p>
+                </div>
+              </div>
+              <div className="detail-shipping-card">
+                <BadgeCheck size={22} />
+                <div>
+                  <strong>증빙</strong>
+                  <p>구매 확정 및 증빙 관련 안내는 주문 진행 과정에서 제공됩니다.</p>
+                </div>
+              </div>
+            </div>
+          )}
+        </section>
+
+        <div className="detail-bottom-grid">
+          <section className="card detail-review-panel">
+            <div className="detail-section-head">
+              <div>
+                <h3>고객 리뷰</h3>
+                <p>구매 후기를 확인하고 남길 수 있습니다.</p>
+              </div>
+              <span className="detail-section-count">{reviews.length}개</span>
+            </div>
+
+            <div className="detail-list">
+              {reviews.length > 0 ? (
+                reviews.map((review) => (
+                  <article key={review.id} className="detail-list-item">
+                    <div className="detail-list-top">
+                      <strong>{review.user_name}</strong>
+                      <div className="detail-star-row" aria-label={`${review.rating}점`}>
+                        {Array.from({ length: 5 }).map((_, index) => (
+                          <Star key={index} size={12} fill={index < Number(review.rating || 0) ? 'currentColor' : 'none'} />
+                        ))}
+                      </div>
+                    </div>
+                    <p>{review.comment}</p>
+                    <span>{new Date(review.created_at).toLocaleDateString()}</span>
+                  </article>
+                ))
+              ) : (
+                <div className="detail-empty-state">등록된 리뷰가 없습니다.</div>
+              )}
+            </div>
+
+            {user ? (
+              <form className="detail-form" onSubmit={handleReviewSubmit}>
+                <div className="detail-form-row">
+                  <label>평점</label>
+                  <select value={rating} onChange={(event) => setRating(Number(event.target.value))}>
+                    <option value={5}>5점</option>
+                    <option value={4}>4점</option>
+                    <option value={3}>3점</option>
+                    <option value={2}>2점</option>
+                    <option value={1}>1점</option>
+                  </select>
+                </div>
+                <textarea
+                  className="detail-textarea"
+                  placeholder="리뷰 내용을 입력해주세요."
+                  value={reviewComment}
+                  onChange={(event) => setReviewComment(event.target.value)}
+                  required
+                />
+                <button type="submit" className="btn btn-primary">리뷰 등록</button>
+              </form>
+            ) : (
+              <div className="detail-empty-state detail-empty-state-soft">리뷰를 작성하려면 로그인이 필요합니다.</div>
+            )}
+          </section>
+
+          <section className="card detail-qna-panel">
+            <div className="detail-section-head">
+              <div>
+                <h3>상품 Q&amp;A</h3>
+                <p>구매 전 문의를 남기거나 답변을 확인할 수 있습니다.</p>
+              </div>
+              <span className="detail-section-count">{qnas.length}개</span>
+            </div>
+
+            <div className="detail-list">
+              {qnas.length > 0 ? (
+                qnas.map((qna) => {
+                  const canRead = !qna.is_secret || (user && (user.id === qna.user_id || user.role === 'admin'));
+                  return (
+                    <article key={qna.id} className="detail-list-item">
+                      <div className="detail-list-top">
+                        <div className="detail-qna-title-row">
+                          {qna.is_secret ? <Lock size={12} /> : null}
+                          <strong>{canRead ? qna.title : '비밀글입니다'}</strong>
+                        </div>
+                        <span>{qna.user_name} · {new Date(qna.created_at).toLocaleDateString()}</span>
+                      </div>
+
+                      {canRead ? (
+                        <div className="detail-qna-body">
+                          <p>{qna.content}</p>
+
+                          {qna.answer ? (
+                            <div className="detail-answer-box">
+                              <strong>관리자 답변</strong>
+                              <p>{qna.answer}</p>
+                            </div>
+                          ) : (
+                            user && user.role === 'admin' && (
+                              <div className="detail-answer-form">
+                                <textarea
+                                  className="detail-textarea detail-textarea-sm"
+                                  placeholder="답변을 입력하세요."
+                                  value={adminAnswerMap[qna.id] || ''}
+                                  onChange={(event) => setAdminAnswerMap((prev) => ({ ...prev, [qna.id]: event.target.value }))}
+                                />
+                                <button
+                                  type="button"
+                                  className="btn btn-outline"
+                                  onClick={() => handleAnswerSubmit(qna.id)}
+                                >
+                                  답변 등록
+                                </button>
+                              </div>
+                            )
+                          )}
+                        </div>
+                      ) : (
+                        <div className="detail-empty-state detail-empty-state-soft">
+                          비밀글은 작성자와 관리자만 볼 수 있습니다.
+                        </div>
+                      )}
+                    </article>
+                  );
+                })
+              ) : (
+                <div className="detail-empty-state">등록된 문의가 없습니다.</div>
+              )}
+            </div>
+
+            {user ? (
+              <form className="detail-form" onSubmit={handleQnaSubmit}>
+                <div className="detail-form-row">
+                  <input
+                    type="text"
+                    className="input"
+                    placeholder="문의 제목"
+                    value={qnaTitle}
+                    onChange={(event) => setQnaTitle(event.target.value)}
+                    required
+                  />
+                </div>
+                <label className="detail-secret-row">
+                  <input
+                    type="checkbox"
+                    checked={qnaSecret}
+                    onChange={(event) => setQnaSecret(event.target.checked)}
+                  />
+                  비밀글로 작성
+                </label>
+                <textarea
+                  className="detail-textarea"
+                  placeholder="문의 내용을 입력해주세요."
+                  value={qnaContent}
+                  onChange={(event) => setQnaContent(event.target.value)}
+                  required
+                />
+                <button type="submit" className="btn btn-primary">문의 등록</button>
+              </form>
+            ) : (
+              <div className="detail-empty-state detail-empty-state-soft">문의하려면 로그인이 필요합니다.</div>
+            )}
+          </section>
         </div>
-        <button 
-          onClick={() => {
-            const chatBtn = document.querySelector('.chat-widget-toggle');
-            if (chatBtn) chatBtn.click();
-          }} 
-          className="btn btn-primary text-xs font-bold py-2 px-4"
-        >
-          실시간 기술상담 문의
-        </button>
+
+        <section className="detail-support-banner">
+          <div className="detail-support-copy">
+            <ShieldCheck size={28} />
+            <div>
+              <h3>기술 상담 및 구매 문의</h3>
+              <p>제품 사양, 호환성, 납기, 대량 구매는 채팅으로 빠르게 확인할 수 있습니다.</p>
+            </div>
+          </div>
+          <button type="button" className="btn btn-primary" onClick={handleOpenInquiry}>
+            상담 열기
+          </button>
+        </section>
       </div>
     </div>
   );
