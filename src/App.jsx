@@ -16,6 +16,7 @@ import NaverCallback from './pages/NaverCallback';
 import KakaoCallback from './pages/KakaoCallback';
 import GoogleCallback from './pages/GoogleCallback';
 import AdditionalInfo from './pages/AdditionalInfo';
+import PrivacyPolicy from './pages/PrivacyPolicy';
 import './App.css';
 
 function MainLayout() {
@@ -63,6 +64,8 @@ function MainLayout() {
         return <GoogleCallback />;
       case 'additionalInfo':
         return <AdditionalInfo />;
+      case 'privacy':
+        return <PrivacyPolicy />;
       default:
         return <Home />;
     }

@@ -343,12 +343,24 @@ app.post('/api/auth/register/verify', async (req, res) => {
       return res.status(409).json({ message: '이미 가입된 이메일입니다. 로그인 또는 비밀번호 찾기를 이용해 주세요.' });
     }
 
-    const userId = `user_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
-    await pool.query(
-      'INSERT INTO users (id, email, password, name, phone, role) VALUES (?, ?, ?, ?, ?, ?)',
-      [userId, verification.email, verification.password_hash, verification.name, verification.phone, 'user']
-    );
-    await pool.query('UPDATE signup_email_verifications SET completed_at = NOW() WHERE id = ?', [verificationId]);
+    const userId = user__;
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      await connection.query(
+        'INSERT INTO users (id, email, password, name, phone, role) VALUES (?, ?, ?, ?, ?, ?)',
+        [userId, verification.email, null, verification.name, verification.phone, 'user']
+      );
+      await upsertLocalAuthIdentity(connection, userId, verification.email, verification.password_hash);
+      await upsertPrivateProfile(connection, userId, verification.phone, '');
+      await connection.query('UPDATE signup_email_verifications SET completed_at = NOW() WHERE id = ?', [verificationId]);
+      await connection.commit();
+    } catch (txError) {
+      await connection.rollback();
+      throw txError;
+    } finally {
+      connection.release();
+    }
 
     return res.status(201).json({ message: '이메일 인증이 완료되어 회원가입이 완료되었습니다.' });
   } catch (error) {
@@ -386,9 +398,10 @@ app.post('/api/auth/register', async (req, res) => {
 
     await pool.query(
       'INSERT INTO users (id, email, password, name, phone, role) VALUES (?, ?, ?, ?, ?, ?)',
-      [userId, email, hashedPassword, name, storedPhone, 'user']
+      [userId, email, null, name, storedPhone, 'user']
     );
-
+    await upsertLocalAuthIdentity(pool, userId, email, hashedPassword);
+    await upsertPrivateProfile(pool, userId, storedPhone, '');
     res.status(201).json({ message: '회원가입이 완료되었습니다.' });
   } catch (error) {
     console.error(error);
@@ -410,12 +423,11 @@ app.post('/api/auth/login', async (req, res) => {
   }
 
   try {
-    const [rows] = await pool.query('SELECT * FROM users WHERE email = ?', [email]);
-    if (rows.length === 0) {
-      return res.status(400).json({ message: '가입되지 않은 이메일이거나 비밀번호가 다릅니다.' });
+    const user = await getMergedUserByEmail(email);
+    if (!user) {
+      return res.status(400).json({ message: '???? ?? ?????? ????? ?????.' });
     }
 
-    const user = rows[0];
     const limit = getLoginLimitForRole(user.role);
     const lockedUntil = user.locked_until ? new Date(user.locked_until) : null;
 
@@ -437,7 +449,8 @@ app.post('/api/auth/login', async (req, res) => {
       user.login_failed_count = 0;
     }
 
-    const passwordMatch = bcrypt.compareSync(password, user.password);
+    const passwordHash = user.auth_password_hash || user.legacy_password || '';
+    const passwordMatch = passwordHash ? bcrypt.compareSync(password, passwordHash) : false;
     if (!passwordMatch) {
       const failedCount = Number(user.login_failed_count || 0) + 1;
 
@@ -456,8 +469,8 @@ app.post('/api/auth/login', async (req, res) => {
 
         const mailResult = await sendMail({
           to: user.email,
-          subject: '[YoungTech] 로그인 제한 해제 인증번호',
-          text: `YoungTech 로그인 제한 해제 인증번호는 ${unlockCode} 입니다.\n\n인증번호는 ${UNLOCK_CODE_MINUTES}분 동안만 사용할 수 있습니다.\n본인이 로그인한 것이 아니라면 비밀번호를 변경하고 고객센터로 문의해 주세요.`
+          subject: '[YoungTech] ??? ?? ?? ????',
+          text: `YoungTech ??? ?? ?? ????? ${unlockCode} ???.\n\n????? ${UNLOCK_CODE_MINUTES}? ??? ??? ? ????.\n?? ??? ???? ????? ??? ???.`
         });
 
         return res.status(423).json({
@@ -475,18 +488,15 @@ app.post('/api/auth/login', async (req, res) => {
       const remaining = limit - failedCount;
       return res.status(400).json({
         message: failedCount >= 4
-          ? `이메일 또는 비밀번호가 일치하지 않습니다. 보안을 위해 ${remaining}회 추가 실패 시 계정이 잠깁니다.`
-          : '가입되지 않은 이메일이거나 비밀번호가 다릅니다.',
+          ? `??? ?? ????? ???? ????. ??? ?? ${remaining}? ?? ?? ? ??? ????.`
+          : '???? ?? ?????? ????? ?????.',
         failedCount,
         remainingAttempts: remaining,
         showSecurityWarning: failedCount >= 4
       });
     }
 
-    await pool.query(
-      'UPDATE users SET login_failed_count = 0, locked_until = NULL, unlock_code_hash = NULL, unlock_code_expires_at = NULL WHERE id = ?',
-      [user.id]
-    );
+    await pool.query('UPDATE users SET login_failed_count = 0, locked_until = NULL, unlock_code_hash = NULL, unlock_code_expires_at = NULL WHERE id = ?', [user.id]);
 
     const token = jwt.sign(
       { id: user.id, email: user.email, name: user.name, role: user.role },
@@ -785,6 +795,175 @@ const sanitizeUser = (user) => ({
   name: user.name,
   role: user.role
 });
+
+const AUTH_PROVIDER = {
+  local: 'local',
+  naver: 'naver',
+  kakao: 'kakao',
+  google: 'google'
+};
+
+const normalizeEmailAddress = (email = '') => String(email || '').trim().toLowerCase();
+
+const getMergedUserById = async (userId) => {
+  const [rows] = await pool.query(
+    `SELECT
+       u.id,
+       u.email,
+       u.name,
+       u.role,
+       u.created_at,
+       u.login_failed_count,
+       u.locked_until,
+       u.unlock_code_hash,
+       u.unlock_code_expires_at,
+       COALESCE(p.phone, u.phone) AS phone,
+       COALESCE(p.address, u.address) AS address,
+       a.password_hash AS auth_password_hash,
+       u.password AS legacy_password,
+       u.naver_id,
+       u.kakao_id,
+       u.google_id
+     FROM users u
+     LEFT JOIN user_private_profiles p ON p.user_id = u.id
+     LEFT JOIN user_auth_identities a ON a.user_id = u.id AND a.provider = ?
+     WHERE u.id = ?
+     LIMIT 1`,
+    [AUTH_PROVIDER.local, userId]
+  );
+  return rows[0] || null;
+};
+
+const getMergedUserByEmail = async (email) => {
+  const normalizedEmail = normalizeEmailAddress(email);
+  if (!normalizedEmail) return null;
+  const [rows] = await pool.query(
+    `SELECT
+       u.id,
+       u.email,
+       u.name,
+       u.role,
+       u.created_at,
+       u.login_failed_count,
+       u.locked_until,
+       u.unlock_code_hash,
+       u.unlock_code_expires_at,
+       COALESCE(p.phone, u.phone) AS phone,
+       COALESCE(p.address, u.address) AS address,
+       a.password_hash AS auth_password_hash,
+       u.password AS legacy_password,
+       u.naver_id,
+       u.kakao_id,
+       u.google_id
+     FROM users u
+     LEFT JOIN user_private_profiles p ON p.user_id = u.id
+     LEFT JOIN user_auth_identities a ON a.user_id = u.id AND a.provider = ?
+     WHERE u.email = ?
+     LIMIT 1`,
+    [AUTH_PROVIDER.local, normalizedEmail]
+  );
+  return rows[0] || null;
+};
+
+const getUserBySocialIdentity = async (provider, providerUserId) => {
+  const [rows] = await pool.query(
+    `SELECT
+       u.id,
+       u.email,
+       u.name,
+       u.role,
+       u.created_at,
+       COALESCE(p.phone, u.phone) AS phone,
+       COALESCE(p.address, u.address) AS address,
+       a.password_hash AS auth_password_hash,
+       a.provider_user_id,
+       u.naver_id,
+       u.kakao_id,
+       u.google_id
+     FROM user_auth_identities a
+     INNER JOIN users u ON u.id = a.user_id
+     LEFT JOIN user_private_profiles p ON p.user_id = u.id
+     WHERE a.provider = ? AND a.provider_user_id = ?
+     LIMIT 1`,
+    [provider, providerUserId]
+  );
+  return rows[0] || null;
+};
+
+const getLegacySocialUserByProvider = async (provider, providerUserId) => {
+  const columnMap = {
+    [AUTH_PROVIDER.naver]: 'naver_id',
+    [AUTH_PROVIDER.kakao]: 'kakao_id',
+    [AUTH_PROVIDER.google]: 'google_id'
+  };
+  const column = columnMap[provider];
+  if (!column) return null;
+  const [rows] = await pool.query(`SELECT * FROM users WHERE ${column} = ? LIMIT 1`, [providerUserId]);
+  return rows[0] || null;
+};
+
+const upsertLocalAuthIdentity = async (connection, userId, email, passwordHash) => {
+  await connection.query(
+    `INSERT INTO user_auth_identities (user_id, provider, provider_user_id, password_hash)
+     VALUES (?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE
+       provider_user_id = VALUES(provider_user_id),
+       password_hash = VALUES(password_hash),
+       updated_at = CURRENT_TIMESTAMP`,
+    [userId, AUTH_PROVIDER.local, normalizeEmailAddress(email), passwordHash]
+  );
+};
+
+const upsertSocialAuthIdentity = async (connection, userId, provider, providerUserId) => {
+  await connection.query(
+    `INSERT INTO user_auth_identities (user_id, provider, provider_user_id, password_hash)
+     VALUES (?, ?, ?, NULL)
+     ON DUPLICATE KEY UPDATE
+       provider_user_id = VALUES(provider_user_id),
+       password_hash = NULL,
+       updated_at = CURRENT_TIMESTAMP`,
+    [userId, provider, String(providerUserId || '').trim()]
+  );
+};
+
+const upsertPrivateProfile = async (connection, userId, phone = '', address = '') => {
+  const normalizedPhone = String(phone || '').replace(/\D/g, '');
+  const normalizedAddress = String(address || '').trim();
+  await connection.query(
+    `INSERT INTO user_private_profiles (user_id, phone, address)
+     VALUES (?, ?, ?)
+     ON DUPLICATE KEY UPDATE
+       phone = VALUES(phone),
+       address = VALUES(address),
+       updated_at = CURRENT_TIMESTAMP`,
+    [userId, normalizedPhone || null, normalizedAddress || null]
+  );
+  await connection.query('UPDATE users SET phone = ?, address = ? WHERE id = ?', [normalizedPhone || null, normalizedAddress || null, userId]);
+};
+
+const syncLegacyAuthColumns = async (connection, userId, updates = {}) => {
+  const setParts = [];
+  const values = [];
+  if (Object.prototype.hasOwnProperty.call(updates, 'password')) {
+    setParts.push('password = ?');
+    values.push(updates.password);
+  }
+  if (Object.prototype.hasOwnProperty.call(updates, 'naver_id')) {
+    setParts.push('naver_id = ?');
+    values.push(updates.naver_id);
+  }
+  if (Object.prototype.hasOwnProperty.call(updates, 'kakao_id')) {
+    setParts.push('kakao_id = ?');
+    values.push(updates.kakao_id);
+  }
+  if (Object.prototype.hasOwnProperty.call(updates, 'google_id')) {
+    setParts.push('google_id = ?');
+    values.push(updates.google_id);
+  }
+  if (setParts.length === 0) return;
+  values.push(userId);
+  await connection.query(`UPDATE users SET ${setParts.join(', ')} WHERE id = ?`, values);
+};
 
 const getDisplayNameFromProfile = (name, email) => {
   const trimmedName = String(name || '').trim();
@@ -2367,6 +2546,284 @@ app.post('/api/products/batch-out-of-stock', requireAdmin, async (req, res) => {
 // ==========================================
 // Orders APIs
 // ==========================================
+const MAX_ORDER_QTY_PER_ITEM = 999;
+const FREE_SHIPPING_THRESHOLD = 500000;
+const DEFAULT_SHIPPING_FEE = 3000;
+
+function calculateShippingFee(subtotal) {
+  if (subtotal <= 0) return 0;
+  return subtotal >= FREE_SHIPPING_THRESHOLD ? 0 : DEFAULT_SHIPPING_FEE;
+}
+
+const MAX_CART_QTY_PER_ITEM = 999;
+
+const normalizeCartQuantity = (value, { allowZero = false } = {}) => {
+  const quantity = Number(value);
+  if (!Number.isInteger(quantity)) {
+    throw new Error('Quantity must be an integer.');
+  }
+  if (allowZero ? quantity < 0 : quantity < 1) {
+    throw new Error(allowZero ? 'Quantity cannot be negative.' : 'Quantity must be at least 1.');
+  }
+  if (quantity > MAX_CART_QTY_PER_ITEM) {
+    throw new Error(`Quantity cannot exceed ${MAX_CART_QTY_PER_ITEM}.`);
+  }
+  return quantity;
+};
+
+const buildCartSnapshot = (rows = []) => {
+  const items = rows.map((row) => {
+    const productId = String(row.product_id || '').trim();
+    const productExists = Boolean(row.cart_product_id);
+    const price = Number(row.price || 0);
+    const quantity = Number(row.quantity || 0);
+    const image = String(row.image || '');
+
+    return {
+      id: productId,
+      productId,
+      quantity,
+      price: productExists ? price : 0,
+      name: row.name || '',
+      image,
+      images: image ? image.split(',').map(part => part.trim()).filter(Boolean) : [],
+      brand: row.brand || '',
+      category: row.category || '',
+      stock: Number(row.stock || 0),
+      is_active: Boolean(row.is_active),
+      is_deleted: Boolean(row.is_deleted),
+      subtotal: productExists ? price * quantity : 0,
+      productExists
+    };
+  });
+
+  const count = items.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+  const subtotal = items.reduce((sum, item) => sum + Number(item.subtotal || 0), 0);
+
+  return { items, count, subtotal };
+};
+
+const fetchCartSnapshot = async (connection, userId) => {
+  const [rows] = await connection.query(
+    `
+      SELECT
+        c.product_id,
+        c.quantity,
+        c.created_at,
+        c.updated_at,
+        p.id AS cart_product_id,
+        p.name,
+        p.category,
+        p.brand,
+        p.price,
+        p.image,
+        p.stock,
+        p.is_active,
+        p.is_deleted
+      FROM cart_items c
+      LEFT JOIN products p ON p.id = c.product_id
+      WHERE c.user_id = ?
+      ORDER BY c.updated_at DESC, c.id DESC
+    `,
+    [userId]
+  );
+
+  return buildCartSnapshot(rows);
+};
+
+const assertCartProductIsAvailable = async (connection, productId) => {
+  const [rows] = await connection.query(
+    `
+      SELECT id, name, price, stock, is_active, is_deleted, image, category, brand
+      FROM products
+      WHERE id = ?
+      FOR UPDATE
+    `,
+    [productId]
+  );
+
+  const product = rows[0];
+  if (!product) {
+    throw new Error('Product not found.');
+  }
+  if (product.is_deleted) {
+    throw new Error('This product has been removed.');
+  }
+  if (!product.is_active) {
+    throw new Error('This product is not available for sale.');
+  }
+
+  return product;
+};
+
+const fetchCartItemQuantity = async (connection, userId, productId) => {
+  const [rows] = await connection.query(
+    'SELECT quantity FROM cart_items WHERE user_id = ? AND product_id = ? FOR UPDATE',
+    [userId, productId]
+  );
+  return Number(rows[0]?.quantity || 0);
+};
+
+app.get('/api/cart', authenticateToken, async (req, res) => {
+  try {
+    const snapshot = await fetchCartSnapshot(pool, req.user.id);
+    res.json(snapshot);
+  } catch (error) {
+    console.error('Get Cart Error:', error);
+    res.status(500).json({ message: error.message || 'Failed to load cart.' });
+  }
+});
+
+app.get('/api/cart/count', authenticateToken, async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      'SELECT COALESCE(SUM(quantity), 0) AS count FROM cart_items WHERE user_id = ?',
+      [req.user.id]
+    );
+    res.json({ count: Number(rows[0]?.count || 0) });
+  } catch (error) {
+    console.error('Get Cart Count Error:', error);
+    res.status(500).json({ message: error.message || 'Failed to load cart count.' });
+  }
+});
+
+app.post('/api/cart/items', authenticateToken, async (req, res) => {
+  const productId = String(req.body?.productId ?? req.body?.id ?? '').trim();
+  const requestedQuantity = req.body?.quantity ?? 1;
+
+  if (!productId) {
+    return res.status(400).json({ message: 'productId is required.' });
+  }
+
+  let quantity;
+  try {
+    quantity = normalizeCartQuantity(requestedQuantity);
+  } catch (error) {
+    return res.status(400).json({ message: error.message });
+  }
+
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    const product = await assertCartProductIsAvailable(connection, productId);
+    const currentQuantity = await fetchCartItemQuantity(connection, req.user.id, productId);
+    const nextQuantity = currentQuantity + quantity;
+
+    if (nextQuantity > Number(product.stock || 0)) {
+      throw new Error('Not enough stock for this cart item.');
+    }
+
+    if (currentQuantity > 0) {
+      await connection.query(
+        'UPDATE cart_items SET quantity = ? WHERE user_id = ? AND product_id = ?',
+        [nextQuantity, req.user.id, productId]
+      );
+    } else {
+      await connection.query(
+        'INSERT INTO cart_items (user_id, product_id, quantity) VALUES (?, ?, ?)',
+        [req.user.id, productId, nextQuantity]
+      );
+    }
+
+    await connection.commit();
+    const snapshot = await fetchCartSnapshot(connection, req.user.id);
+    res.json({ success: true, ...snapshot });
+  } catch (error) {
+    await connection.rollback();
+    console.error('Add Cart Item Error:', error);
+    res.status(400).json({ message: error.message || 'Failed to add cart item.' });
+  } finally {
+    connection.release();
+  }
+});
+
+app.patch('/api/cart/items/:productId', authenticateToken, async (req, res) => {
+  const productId = String(req.params.productId || '').trim();
+  if (!productId) {
+    return res.status(400).json({ message: 'productId is required.' });
+  }
+
+  let quantity;
+  try {
+    quantity = normalizeCartQuantity(req.body?.quantity, { allowZero: true });
+  } catch (error) {
+    return res.status(400).json({ message: error.message });
+  }
+
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const product = await assertCartProductIsAvailable(connection, productId);
+
+    if (quantity === 0) {
+      await connection.query(
+        'DELETE FROM cart_items WHERE user_id = ? AND product_id = ?',
+        [req.user.id, productId]
+      );
+      await connection.commit();
+      const snapshot = await fetchCartSnapshot(connection, req.user.id);
+      return res.json({ success: true, ...snapshot });
+    }
+
+    if (quantity > Number(product.stock || 0)) {
+      throw new Error('Not enough stock for this cart item.');
+    }
+
+    const currentQuantity = await fetchCartItemQuantity(connection, req.user.id, productId);
+    if (currentQuantity === 0) {
+      await connection.query(
+        'INSERT INTO cart_items (user_id, product_id, quantity) VALUES (?, ?, ?)',
+        [req.user.id, productId, quantity]
+      );
+    } else {
+      await connection.query(
+        'UPDATE cart_items SET quantity = ? WHERE user_id = ? AND product_id = ?',
+        [quantity, req.user.id, productId]
+      );
+    }
+
+    await connection.commit();
+    const snapshot = await fetchCartSnapshot(connection, req.user.id);
+    res.json({ success: true, ...snapshot });
+  } catch (error) {
+    await connection.rollback();
+    console.error('Update Cart Item Error:', error);
+    res.status(400).json({ message: error.message || 'Failed to update cart item.' });
+  } finally {
+    connection.release();
+  }
+});
+
+app.delete('/api/cart/items/:productId', authenticateToken, async (req, res) => {
+  const productId = String(req.params.productId || '').trim();
+  if (!productId) {
+    return res.status(400).json({ message: 'productId is required.' });
+  }
+
+  try {
+    await pool.query(
+      'DELETE FROM cart_items WHERE user_id = ? AND product_id = ?',
+      [req.user.id, productId]
+    );
+    const snapshot = await fetchCartSnapshot(pool, req.user.id);
+    res.json({ success: true, ...snapshot });
+  } catch (error) {
+    console.error('Delete Cart Item Error:', error);
+    res.status(500).json({ message: error.message || 'Failed to delete cart item.' });
+  }
+});
+
+app.delete('/api/cart', authenticateToken, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM cart_items WHERE user_id = ?', [req.user.id]);
+    res.json({ success: true, items: [], count: 0, subtotal: 0 });
+  } catch (error) {
+    console.error('Clear Cart Error:', error);
+    res.status(500).json({ message: error.message || 'Failed to clear cart.' });
+  }
+});
+
 app.post('/api/orders', authenticateToken, async (req, res) => {
   const {
     total_amount,
@@ -2378,7 +2835,7 @@ app.post('/api/orders', authenticateToken, async (req, res) => {
     tax_document_status = 'issued_by_pg',
     tax_note = ''
   } = req.body;
-  if (!total_amount || !order_items || !address) {
+  if (!order_items || !address) {
     return res.status(400).json({ message: '주문 정보가 누락되었습니다.' });
   }
 
@@ -2395,11 +2852,97 @@ app.post('/api/orders', authenticateToken, async (req, res) => {
   try {
     await connection.beginTransaction();
 
-    // Insert Order
-    const itemsWithStatus = order_items.map(item => ({
-      ...item,
-      status: item.status || 'pending'
-    }));
+    if (!Array.isArray(order_items) || order_items.length === 0) {
+      throw new Error('주문 상품 정보가 올바르지 않습니다.');
+    }
+
+    const requestedItems = [];
+    const quantityByProductId = new Map();
+
+    for (const rawItem of order_items) {
+      const productId = String(rawItem?.id ?? rawItem?.productId ?? '').trim();
+      const quantity = Number(rawItem?.quantity);
+
+      if (!productId) {
+        throw new Error('주문 상품 ID가 올바르지 않습니다.');
+      }
+      if (!Number.isInteger(quantity)) {
+        throw new Error(`수량은 정수여야 합니다: ${productId}`);
+      }
+      if (quantity < 1) {
+        throw new Error(`수량은 1개 이상이어야 합니다: ${productId}`);
+      }
+      if (quantity > MAX_ORDER_QTY_PER_ITEM) {
+        throw new Error(`상품당 최대 주문 수량을 초과했습니다: ${productId}`);
+      }
+
+      const nextQuantity = (quantityByProductId.get(productId) || 0) + quantity;
+      if (nextQuantity > MAX_ORDER_QTY_PER_ITEM) {
+        throw new Error(`상품당 최대 주문 수량을 초과했습니다: ${productId}`);
+      }
+
+      quantityByProductId.set(productId, nextQuantity);
+      if (!requestedItems.includes(productId)) {
+        requestedItems.push(productId);
+      }
+    }
+
+    const [productRows] = await connection.query(
+      `SELECT id, name, price, stock, is_active, is_deleted
+       FROM products
+       WHERE id IN (?)
+       FOR UPDATE`,
+      [requestedItems]
+    );
+    const productMap = new Map(productRows.map(product => [product.id, product]));
+
+    const serverOrderItems = [];
+    let subtotalAmount = 0;
+
+    for (const productId of requestedItems) {
+      const product = productMap.get(productId);
+      if (!product) {
+        throw new Error(`삭제되었거나 존재하지 않는 상품입니다: ${productId}`);
+      }
+      if (product.is_deleted) {
+        throw new Error(`삭제되었거나 존재하지 않는 상품입니다: ${product.name}`);
+      }
+      if (!product.is_active) {
+        throw new Error(`판매 중지된 상품입니다: ${product.name}`);
+      }
+
+      const unitPrice = Number(product.price);
+      const quantity = quantityByProductId.get(productId) || 0;
+      const stock = Number(product.stock);
+
+      if (!Number.isFinite(unitPrice) || unitPrice <= 0) {
+        throw new Error(`상품 가격이 올바르지 않습니다: ${product.name}`);
+      }
+      if (!Number.isInteger(quantity) || quantity < 1) {
+        throw new Error(`수량이 올바르지 않습니다: ${product.name}`);
+      }
+      if (!Number.isInteger(stock) || stock < quantity) {
+        throw new Error(`상품 재고가 부족합니다: ${product.name}`);
+      }
+
+      const itemSubtotal = unitPrice * quantity;
+      subtotalAmount += itemSubtotal;
+      serverOrderItems.push({
+        id: product.id,
+        name: product.name,
+        price: unitPrice,
+        quantity,
+        subtotal: itemSubtotal,
+        status: 'pending'
+      });
+    }
+
+    const shippingFee = calculateShippingFee(subtotalAmount);
+    const serverTotalAmount = subtotalAmount + shippingFee;
+    const clientTotalAmount = Number(total_amount);
+    if (Number.isFinite(clientTotalAmount) && clientTotalAmount !== serverTotalAmount) {
+      throw new Error('주문 금액이 올바르지 않습니다. 다시 확인해 주세요.');
+    }
 
     await connection.query(
       `INSERT INTO orders
@@ -2408,39 +2951,51 @@ app.post('/api/orders', authenticateToken, async (req, res) => {
       [
         orderId,
         req.user.id,
-        total_amount,
+        serverTotalAmount,
         normalizedPaymentMethod,
         normalizedCardType,
         normalizedTaxType,
         normalizedTaxStatus,
         taxInvoiceRequired,
         tax_note,
-        JSON.stringify(itemsWithStatus),
+        JSON.stringify(serverOrderItems),
         address,
         'pending'
       ]
     );
 
     // Update stock & Update analytics
-    for (const item of order_items) {
-      await connection.query(
-        'UPDATE products SET stock = GREATEST(stock - ?, 0) WHERE id = ?',
-        [item.quantity, item.id]
+    for (const item of serverOrderItems) {
+      const [stockResult] = await connection.query(
+        'UPDATE products SET stock = stock - ? WHERE id = ? AND stock >= ? AND is_active = TRUE AND is_deleted = FALSE',
+        [item.quantity, item.id, item.quantity]
       );
+      if (!stockResult.affectedRows) {
+        throw new Error(`상품 재고가 부족합니다: ${item.name}`);
+      }
     }
 
     const todayString = new Date().toISOString().split('T')[0];
     await connection.query(`
       INSERT INTO analytics (date, revenue, visitors) VALUES (?, ?, 1)
       ON DUPLICATE KEY UPDATE revenue = revenue + VALUES(revenue)
-    `, [todayString, total_amount]);
+    `, [todayString, serverTotalAmount]);
 
     await connection.commit();
-    res.json({ message: '주문이 접수되었습니다.', orderId });
+    res.json({
+      message: '주문이 접수되었습니다.',
+      orderId,
+      totalAmount: serverTotalAmount,
+      shippingFee,
+      subtotalAmount,
+      orderItems: serverOrderItems
+    });
   } catch (error) {
     await connection.rollback();
     console.error(error);
-    res.status(500).json({ message: '서버 오류가 발생했습니다.' });
+    const message = error?.message || '서버 오류가 발생했습니다.';
+    const statusCode = /재고|판매 중지|삭제되었|올바르지 않|금액/.test(message) ? 400 : 500;
+    res.status(statusCode).json({ message });
   } finally {
     connection.release();
   }

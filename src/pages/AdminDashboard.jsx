@@ -6,6 +6,81 @@ import {
 } from 'lucide-react';
 import './AdminDashboard.css';
 
+const SPEC_TEMPLATE_PRESETS = {
+  general: [
+    ['메이커', ''],
+    ['모델명', ''],
+    ['핵심 사양', ''],
+    ['호환 정보', '']
+  ],
+  motor: [
+    ['메이커', ''],
+    ['시리즈', ''],
+    ['품번', ''],
+    ['정격 출력', ''],
+    ['정격 토크', ''],
+    ['정격 속도', ''],
+    ['최고 속도', ''],
+    ['전원 전압', ''],
+    ['보호 등급', ''],
+    ['질량', '']
+  ],
+  plc: [
+    ['메이커', ''],
+    ['시리즈', ''],
+    ['CPU', ''],
+    ['입출력 점수', ''],
+    ['전원', ''],
+    ['통신 방식', ''],
+    ['메모리', ''],
+    ['프로그램 용량', ''],
+    ['확장 모듈', ''],
+    ['동작 온도', '']
+  ]
+};
+
+const SPEC_TEMPLATE_LABELS = {
+  general: '??/??',
+  motor: '????',
+  plc: 'PLC',
+  custom: '?? ??'
+};
+
+const createSpecsFromTemplate = (templateKey = 'custom') => {
+  if (templateKey === 'custom') return {};
+  return Object.fromEntries(SPEC_TEMPLATE_PRESETS[templateKey] || []);
+};
+
+const sanitizeSpecs = (specs = {}) =>
+  Object.fromEntries(
+    Object.entries(specs || {}).filter(([, value]) => {
+      const text = String(value ?? '').trim();
+      return text !== '';
+    })
+  );
+
+const inferSpecTemplate = (category = '', specs = {}) => {
+  const normalizedCategory = String(category || '').trim().toLowerCase();
+  if (normalizedCategory === 'plc') return 'plc';
+  if (normalizedCategory === 'motor') return 'motor';
+
+  const specKeys = new Set(Object.keys(specs || {}));
+  if (specKeys.has('CPU') || specKeys.has('입출력 점수')) return 'plc';
+  if (specKeys.has('정격 토크') || specKeys.has('정격 출력')) return 'motor';
+  return 'general';
+};
+
+const makeUniqueSpecKey = (baseKey, specs = {}) => {
+  const base = String(baseKey || '스펙 항목').trim() || '스펙 항목';
+  if (!Object.prototype.hasOwnProperty.call(specs, base)) return base;
+
+  let index = 2;
+  while (Object.prototype.hasOwnProperty.call(specs, `${base} ${index}`)) {
+    index += 1;
+  }
+  return `${base} ${index}`;
+};
+
 export default function AdminDashboard() {
   const { 
     user, navigate, fetchAdminStats, fetchAllOrders, updateOrderStatus,
@@ -61,7 +136,8 @@ export default function AdminDashboard() {
   const [editingProduct, setEditingProduct] = useState(null);
   const [prodForm, setProdForm] = useState({
     id: '', name: '', category: 'motor', sub_category: '', brand: '', price: '', image: '', images: [], description: '', stock: 50, is_active: true,
-    specs: { '메이커': '', '스펙설명': '' }
+    spec_template: 'motor',
+    specs: createSpecsFromTemplate('motor')
   });
   const [formError, setFormError] = useState('');
   const [priceConfirmed, setPriceConfirmed] = useState(false);
@@ -417,35 +493,29 @@ export default function AdminDashboard() {
   const createCategoryIdFromName = (name) => {
     const normalized = String(name || '').trim().toLowerCase();
     const knownIds = {
-      '모터': 'motor',
-      '감속기': 'reducer',
-      '로봇': 'robot',
-      '볼스크류/lm': 'motion',
-      '볼스크류': 'ball-screw',
-      '서보모터': 'servo-motor',
-      '서보드라이브': 'servo-drive',
-      '케이블': 'cable',
-      '파나소닉': 'panasonic',
-      '미쓰비시': 'mitsubishi',
-      '이노밴스': 'inovance',
-      '파스텍': 'fastech',
-      '니덱': 'nidec',
-      '닛키덴소': 'nikki-denso',
-      '문스': 'moons',
-      'rs오토메이션': 'rs-automation'
+      '????': 'motor',
+      '??': 'motor',
+      '???': 'reducer',
+      '??': 'robot',
+      '????/lm': 'motion',
+      '????': 'ball-screw',
+      '??????': 'servo-drive',
+      '???': 'cable',
+      '????': 'panasonic',
+      '????': 'mitsubishi',
+      '????': 'inovance',
+      '???': 'fastech',
+      '??': 'nidec',
+      '????': 'nikki-denso',
+      '??': 'moons',
+      'rs automation': 'rs-automation'
     };
     const mappedId = knownIds[normalized];
     const baseId = mappedId || normalized
       .replace(/&/g, 'and')
-      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/[^a-z0-9?-?]+/g, '-')
       .replace(/^-+|-+$/g, '');
-    const usedIds = new Set(localCategories.map((cat) => cat.id));
-    const slug = baseId || 'cat';
-    let candidate = `${slug}-${Math.random().toString(36).slice(2, 6)}`;
-    while (usedIds.has(candidate)) {
-      candidate = `${slug}-${Math.random().toString(36).slice(2, 6)}`;
-    }
-    return candidate;
+    return baseId || 'category';
   };
 
   const handleAddCategoryDraft = () => {
@@ -817,7 +887,7 @@ export default function AdminDashboard() {
     setPriceConfirmed(false);
     
     // Parse specs if it's a string, or copy directly if it's already an object
-    let parsedSpecs = { '메이커': '', '스펙설명': '' };
+    let parsedSpecs = createSpecsFromTemplate(inferSpecTemplate(p.category, p.specs || {}));
     if (p.specs) {
       try {
         parsedSpecs = typeof p.specs === 'string' ? JSON.parse(p.specs) : p.specs;
@@ -839,6 +909,7 @@ export default function AdminDashboard() {
       description: p.description || '',
       stock: p.stock || 50,
       is_active: p.is_active !== false && p.is_active !== 0,
+      spec_template: inferSpecTemplate(categorySelection.category, parsedSpecs),
       specs: parsedSpecs
     });
 
@@ -955,9 +1026,21 @@ export default function AdminDashboard() {
   const openAddModal = (initialCategory = 'motor') => {
     setEditingProduct(null);
     const categorySelection = resolveProductCategorySelection(initialCategory);
+    const templateKey = inferSpecTemplate(categorySelection.category);
     setProdForm({
-      id: '', name: '', category: categorySelection.category, sub_category: categorySelection.sub_category, brand: '', price: '', image: '', images: [], description: '', stock: 50, is_active: true,
-      specs: { '메이커': '', '상세정보': '' }
+      id: '',
+      name: '',
+      category: categorySelection.category,
+      sub_category: categorySelection.sub_category,
+      brand: '',
+      price: '',
+      image: '',
+      images: [],
+      description: '',
+      stock: 50,
+      is_active: true,
+      spec_template: templateKey,
+      specs: createSpecsFromTemplate(templateKey)
     });
     setFormError('');
     setPriceConfirmed(false);
@@ -967,6 +1050,7 @@ export default function AdminDashboard() {
   const openEditModal = (p) => {
     setEditingProduct(p);
     const categorySelection = resolveProductCategorySelection(p.category);
+    const templateKey = inferSpecTemplate(categorySelection.category, p.specs || {});
     setProdForm({
       id: p.id,
       name: p.name,
@@ -979,21 +1063,86 @@ export default function AdminDashboard() {
       description: p.description || '',
       stock: p.stock || 0,
       is_active: p.is_active !== false && p.is_active !== 0,
-      specs: p.specs || { '메이커': '', '상세정보': '' }
+      spec_template: templateKey,
+      specs: Object.keys(p.specs || {}).length > 0 ? p.specs : createSpecsFromTemplate(templateKey)
     });
     setFormError('');
     setPriceConfirmed(false);
     setShowProductModal(true);
   };
 
-  const handleSpecChange = (key, val) => {
+  const handleSpecKeyChange = (oldKey, nextKey) => {
+    setProdForm(prev => {
+      const nextSpecs = {};
+      const normalizedNextKey = String(nextKey || '').trim();
+
+      Object.entries(prev.specs || {}).forEach(([key, value]) => {
+        if (key === oldKey) {
+          if (normalizedNextKey) {
+            nextSpecs[normalizedNextKey] = value;
+          }
+          return;
+        }
+
+        const trimmedKey = String(key || '').trim();
+        if (trimmedKey) {
+          nextSpecs[trimmedKey] = value;
+        }
+      });
+
+      return {
+        ...prev,
+        specs: nextSpecs
+      };
+    });
+  };
+
+  const handleSpecValueChange = (key, val) => {
     setProdForm(prev => ({
       ...prev,
       specs: {
-        ...prev.specs,
+        ...(prev.specs || {}),
         [key]: val
       }
     }));
+  };
+
+  const handleAddSpecRow = () => {
+    setProdForm(prev => {
+      const nextSpecs = { ...(prev.specs || {}) };
+      const nextKey = makeUniqueSpecKey('스펙 항목', nextSpecs);
+      nextSpecs[nextKey] = '';
+      return {
+        ...prev,
+        specs: nextSpecs
+      };
+    });
+  };
+
+  const handleRemoveSpecRow = (targetKey) => {
+    setProdForm(prev => {
+      const nextSpecs = { ...(prev.specs || {}) };
+      delete nextSpecs[targetKey];
+      return {
+        ...prev,
+        specs: nextSpecs
+      };
+    });
+  };
+
+  const handleApplySpecTemplate = () => {
+    setProdForm(prev => {
+      const templateKey = prev.spec_template || 'custom';
+      if (templateKey === 'custom') return prev;
+
+      return {
+        ...prev,
+        specs: {
+          ...createSpecsFromTemplate(templateKey),
+          ...(prev.specs || {})
+        }
+      };
+    });
   };
 
   const handleProductSubmit = async (e) => {
@@ -1033,11 +1182,17 @@ export default function AdminDashboard() {
 
     // Merge images array to a single comma-separated string for DB storage
     const submitData = {
-      ...prodForm,
-      ...(editingProduct ? { id: prodForm.id } : {}),
+      id: prodForm.id,
+      name: prodForm.name,
       category: finalCategory,
-      is_active: true,
-      image: prodForm.images.join(',')
+      sub_category: prodForm.sub_category,
+      brand: prodForm.brand,
+      price: priceNum,
+      image: prodForm.images.join(','),
+      description: prodForm.description,
+      specs: sanitizeSpecs(prodForm.specs),
+      stock: Number(prodForm.stock) || 0,
+      is_active: true
     };
 
     let res;
@@ -2623,7 +2778,8 @@ export default function AdminDashboard() {
                         onChange={(e) => setProdForm({
                           ...prodForm,
                           category: e.target.value,
-                          sub_category: ''
+                          sub_category: '',
+                          spec_template: inferSpecTemplate(e.target.value, prodForm.specs || {})
                         })}
                       >
                         {(parentCategoryOptions || []).map((cat) => (
@@ -2824,29 +2980,80 @@ export default function AdminDashboard() {
                   <div className="specs-section">
                     <div className="flex items-center justify-between gap-3 mb-3">
                       <h4 className="text-xs font-bold mb-0">상세 사양 명세 (Specs)</h4>
-                      <span className="text-3xs text-light font-semibold">판매 화면에 노출되지 않는 내부 사양 입력용</span>
+                      <span className="text-3xs text-light font-semibold">상품군별 템플릿과 자유 입력을 함께 사용할 수 있습니다.</span>
                     </div>
-                    <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+                    <div className="product-modal-grid two-col mb-3">
                       <div className="form-group">
-                        <label className="text-2xs text-light font-bold">제조 메이커</label>
-                        <input
-                          type="text"
-                          className="form-input text-xs h-11"
-                          value={prodForm.specs['메이커'] || ''}
-                          onChange={(e) => handleSpecChange('메이커', e.target.value)}
-                          placeholder="예: INOVANCE"
-                        />
+                        <label className="form-label text-xs font-bold mb-1">스펙 템플릿</label>
+                        <select
+                          className="form-select text-xs h-11 bg-white"
+                          value={prodForm.spec_template || 'custom'}
+                          onChange={(e) => setProdForm({ ...prodForm, spec_template: e.target.value })}
+                        >
+                          {Object.entries(SPEC_TEMPLATE_LABELS).map(([key, label]) => (
+                            <option key={key} value={key}>{label}</option>
+                          ))}
+                        </select>
                       </div>
-                      <div className="form-group">
-                        <label className="text-2xs text-light font-bold">상세 스펙 항목</label>
-                        <input
-                          type="text"
-                          className="form-input text-xs h-11"
-                          value={prodForm.specs['상세정보'] || ''}
-                          onChange={(e) => handleSpecChange('상세정보', e.target.value)}
-                          placeholder="예: 23-bit, EtherCAT 지원"
-                        />
+                      <div className="form-group flex items-end">
+                        <button
+                          type="button"
+                          className="btn btn-secondary py-2.5 px-4 text-xs font-bold w-full"
+                          onClick={handleApplySpecTemplate}
+                        >
+                          템플릿 적용
+                        </button>
                       </div>
+                    </div>
+
+                    <div className="flex flex-col gap-3">
+                      {Object.entries(prodForm.specs || {}).length > 0 ? (
+                        Object.entries(prodForm.specs || {}).map(([key, value]) => (
+                          <div key={key} className="product-modal-grid two-col">
+                            <div className="form-group">
+                              <label className="text-2xs text-light font-bold">항목명</label>
+                              <input
+                                type="text"
+                                className="form-input text-xs h-11"
+                                value={key}
+                                onChange={(e) => handleSpecKeyChange(key, e.target.value)}
+                                placeholder="예: 정격 출력"
+                              />
+                            </div>
+                            <div className="form-group">
+                              <label className="text-2xs text-light font-bold">항목값</label>
+                              <div className="flex gap-2">
+                                <input
+                                  type="text"
+                                  className="form-input text-xs h-11 flex-1"
+                                  value={value}
+                                  onChange={(e) => handleSpecValueChange(key, e.target.value)}
+                                  placeholder="예: 750 W"
+                                />
+                                <button
+                                  type="button"
+                                  className="btn btn-secondary py-2 px-3 text-2xs font-bold"
+                                  onClick={() => handleRemoveSpecRow(key)}
+                                >
+                                  삭제
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <p className="text-xs text-light">등록된 스펙이 없습니다. 템플릿을 적용하거나 항목을 추가해 주세요.</p>
+                      )}
+                    </div>
+
+                    <div className="mt-3 flex justify-end">
+                      <button
+                        type="button"
+                        className="btn btn-primary py-2 px-4 text-xs font-bold"
+                        onClick={handleAddSpecRow}
+                      >
+                        스펙 항목 추가
+                      </button>
                     </div>
                   </div>
                 </section>

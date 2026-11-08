@@ -69,6 +69,27 @@
   margin: 0.15rem 0;
 }
 
+.footer-legal-link-row {
+  margin-top: 0.75rem;
+}
+
+.footer-legal-link-row a {
+  color: #cbd5e1;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.footer-inline-privacy-link {
+  margin-left: 0.5rem;
+  color: #cbd5e1;
+  font-size: 0.85rem;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  white-space: nowrap;
+}
+
 .footer-business b {
   color: #cbd5e1;
 }

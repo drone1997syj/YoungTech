@@ -35,6 +35,15 @@ const safeJsonParse = (value, fallback) => {
   }
 };
 
+const GUEST_CART_STORAGE_KEY = 'yt_cart';
+
+const readGuestCart = () => safeJsonParse(localStorage.getItem(GUEST_CART_STORAGE_KEY), []);
+
+const writeGuestCart = (cartItems) => {
+  localStorage.setItem(GUEST_CART_STORAGE_KEY, JSON.stringify(cartItems));
+  return cartItems;
+};
+
 const VALID_PAGES = new Set([
   'home',
   'productList',
@@ -45,7 +54,8 @@ const VALID_PAGES = new Set([
   'checkout',
   'myPage',
   'admin',
-  'additionalInfo'
+  'additionalInfo',
+  'privacy'
 ]);
 
 const PAGE_TO_PATH = {
@@ -57,7 +67,8 @@ const PAGE_TO_PATH = {
   checkout: '/checkout',
   myPage: '/mypage',
   admin: '/admin',
-  additionalInfo: '/additional-info'
+  additionalInfo: '/additional-info',
+  privacy: '/privacy'
 };
 
 const getRouteFromPath = () => {
@@ -103,6 +114,7 @@ export const ShopProvider = ({ children }) => {
   const [categories, setCategories] = useState([]);
   const [motorBrands, setMotorBrands] = useState([]);
   const [cart, setCart] = useState([]);
+  const [cartCount, setCartCount] = useState(0);
   const [searchQuery, setSearchQuery] = useState('');
   const [compareList, setCompareList] = useState([]);
   const [chatOpen, setChatOpen] = useState(false);
@@ -210,18 +222,30 @@ export const ShopProvider = ({ children }) => {
     }
   };
 
+  const loadGuestCart = () => {
+    const guestCart = readGuestCart();
+    setCart(guestCart);
+    setCartCount(guestCart.reduce((sum, item) => sum + Number(item.quantity || 0), 0));
+  };
+
+  const loadServerCart = async () => {
+    try {
+      const data = await apiFetch('/cart');
+      const serverCart = Array.isArray(data?.items) ? data.items : [];
+      setCart(serverCart);
+      setCartCount(Number(data?.count ?? serverCart.reduce((sum, item) => sum + Number(item.quantity || 0), 0)));
+    } catch (err) {
+      console.error('Failed to load server cart:', err);
+    }
+  };
+
   useEffect(() => {
     const initSession = async () => {
       setLoading(true);
       await fetchCategories();
       await fetchMotorBrands();
       await fetchProducts();
-
-      // Load local cart
-      const storedCart = localStorage.getItem('yt_cart');
-      if (storedCart) {
-        setCart(safeJsonParse(storedCart, []));
-      }
+      loadGuestCart();
 
       // Check current user token
       const token = localStorage.getItem('yt_token');
@@ -263,6 +287,13 @@ export const ShopProvider = ({ children }) => {
 
     initSession();
   }, []);
+
+  useEffect(() => {
+    if (loading) return;
+    if (user?.id) {
+      loadServerCart();
+    }
+  }, [user?.id, loading]);
 
   useEffect(() => {
     const handlePopState = () => {
@@ -327,16 +358,39 @@ export const ShopProvider = ({ children }) => {
   const logout = () => {
     localStorage.removeItem('yt_token');
     setUser(null);
+    loadGuestCart();
     navigate('home');
   };
 
   // --- Cart Actions ---
-  const saveCartToStorage = (updatedCart) => {
+  const saveGuestCart = (updatedCart) => {
     setCart(updatedCart);
-    localStorage.setItem('yt_cart', JSON.stringify(updatedCart));
+    setCartCount(updatedCart.reduce((sum, item) => sum + Number(item.quantity || 0), 0));
+    writeGuestCart(updatedCart);
   };
 
-  const handleAddToCart = (product, quantity = 1) => {
+  const saveServerCart = async (endpoint, options = {}) => {
+    const data = await apiFetch(endpoint, options);
+    const serverCart = Array.isArray(data?.items) ? data.items : [];
+    setCart(serverCart);
+    setCartCount(Number(data?.count ?? serverCart.reduce((sum, item) => sum + Number(item.quantity || 0), 0)));
+    return serverCart;
+  };
+
+  const handleAddToCart = async (product, quantity = 1) => {
+    if (user?.id) {
+      try {
+        await saveServerCart('/cart/items', {
+          method: 'POST',
+          body: JSON.stringify({ productId: product.id, quantity })
+        });
+        return { success: true };
+      } catch (err) {
+        console.error('Failed to add server cart item:', err);
+        return { success: false, message: err.message };
+      }
+    }
+
     const existingIndex = cart.findIndex(item => item.id === product.id);
     let updatedCart = [...cart];
 
@@ -345,23 +399,64 @@ export const ShopProvider = ({ children }) => {
     } else {
       updatedCart.push({ ...product, quantity });
     }
-    saveCartToStorage(updatedCart);
+    saveGuestCart(updatedCart);
+    return { success: true };
   };
 
-  const handleUpdateQty = (productId, quantity) => {
+  const handleUpdateQty = async (productId, quantity) => {
+    if (user?.id) {
+      try {
+        await saveServerCart(`/cart/items/${encodeURIComponent(productId)}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ quantity })
+        });
+        return { success: true };
+      } catch (err) {
+        console.error('Failed to update server cart item:', err);
+        return { success: false, message: err.message };
+      }
+    }
+
     const updatedCart = cart.map(item =>
       item.id === productId ? { ...item, quantity: Math.max(1, quantity) } : item
     );
-    saveCartToStorage(updatedCart);
+    saveGuestCart(updatedCart);
+    return { success: true };
   };
 
-  const handleRemoveFromCart = (productId) => {
+  const handleRemoveFromCart = async (productId) => {
+    if (user?.id) {
+      try {
+        await saveServerCart(`/cart/items/${encodeURIComponent(productId)}`, {
+          method: 'DELETE'
+        });
+        return { success: true };
+      } catch (err) {
+        console.error('Failed to remove server cart item:', err);
+        return { success: false, message: err.message };
+      }
+    }
+
     const updatedCart = cart.filter(item => item.id !== productId);
-    saveCartToStorage(updatedCart);
+    saveGuestCart(updatedCart);
+    return { success: true };
   };
 
-  const handleClearCart = () => {
-    saveCartToStorage([]);
+  const handleClearCart = async () => {
+    if (user?.id) {
+      try {
+        await saveServerCart('/cart', {
+          method: 'DELETE'
+        });
+        return { success: true };
+      } catch (err) {
+        console.error('Failed to clear server cart:', err);
+        return { success: false, message: err.message };
+      }
+    }
+
+    saveGuestCart([]);
+    return { success: true };
   };
 
   // --- Compare Actions ---
@@ -391,7 +486,7 @@ export const ShopProvider = ({ children }) => {
         method: 'POST',
         body: JSON.stringify(orderData)
       });
-      handleClearCart();
+      await handleClearCart();
       return { success: true, orderId: res.orderId };
     } catch (err) {
       return { success: false, message: err.message };
@@ -826,6 +921,7 @@ export const ShopProvider = ({ children }) => {
       updateQty: handleUpdateQty,
       removeFromCart: handleRemoveFromCart,
       clearCart: handleClearCart,
+      cartCount,
       addToCompare,
       removeFromCompare,
       clearCompare,

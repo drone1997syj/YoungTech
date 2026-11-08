@@ -124,6 +124,93 @@ export async function initDb() {
     } catch (err) {}
 
     try {
+      await connection.query(`
+        ALTER TABLE users MODIFY COLUMN password VARCHAR(255) DEFAULT NULL
+      `);
+      console.log('Successfully relaxed password column to allow auth split.');
+    } catch (err) {}
+
+    // Split auth/private profile tables
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS user_auth_identities (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        user_id VARCHAR(100) NOT NULL,
+        provider VARCHAR(20) NOT NULL,
+        provider_user_id VARCHAR(255) NOT NULL,
+        password_hash VARCHAR(255) DEFAULT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_user_provider (user_id, provider),
+        UNIQUE KEY uq_provider_identity (provider, provider_user_id),
+        KEY idx_auth_user (user_id),
+        KEY idx_auth_provider (provider)
+      ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS user_private_profiles (
+        user_id VARCHAR(100) PRIMARY KEY,
+        phone VARCHAR(50),
+        address TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        KEY idx_profile_phone (phone)
+      ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
+    // Backfill split tables from legacy users data when needed.
+    await connection.query(`
+      INSERT INTO user_auth_identities (user_id, provider, provider_user_id, password_hash)
+      SELECT id, 'local', email, password
+      FROM users
+      WHERE password IS NOT NULL AND password <> ''
+      ON DUPLICATE KEY UPDATE
+        provider_user_id = VALUES(provider_user_id),
+        password_hash = VALUES(password_hash),
+        updated_at = CURRENT_TIMESTAMP
+    `);
+
+    await connection.query(`
+      INSERT INTO user_auth_identities (user_id, provider, provider_user_id, password_hash)
+      SELECT id, 'naver', naver_id, NULL
+      FROM users
+      WHERE naver_id IS NOT NULL AND naver_id <> ''
+      ON DUPLICATE KEY UPDATE
+        provider_user_id = VALUES(provider_user_id),
+        updated_at = CURRENT_TIMESTAMP
+    `);
+
+    await connection.query(`
+      INSERT INTO user_auth_identities (user_id, provider, provider_user_id, password_hash)
+      SELECT id, 'kakao', kakao_id, NULL
+      FROM users
+      WHERE kakao_id IS NOT NULL AND kakao_id <> ''
+      ON DUPLICATE KEY UPDATE
+        provider_user_id = VALUES(provider_user_id),
+        updated_at = CURRENT_TIMESTAMP
+    `);
+
+    await connection.query(`
+      INSERT INTO user_auth_identities (user_id, provider, provider_user_id, password_hash)
+      SELECT id, 'google', google_id, NULL
+      FROM users
+      WHERE google_id IS NOT NULL AND google_id <> ''
+      ON DUPLICATE KEY UPDATE
+        provider_user_id = VALUES(provider_user_id),
+        updated_at = CURRENT_TIMESTAMP
+    `);
+
+    await connection.query(`
+      INSERT INTO user_private_profiles (user_id, phone, address)
+      SELECT id, phone, address
+      FROM users
+      ON DUPLICATE KEY UPDATE
+        phone = VALUES(phone),
+        address = VALUES(address),
+        updated_at = CURRENT_TIMESTAMP
+    `);
+
+    try {
       const [targetRows] = await connection.query('SELECT id FROM users WHERE email = ?', ['drone1997@naver.com']);
       if (targetRows.length === 0) {
         await connection.query(
@@ -165,19 +252,25 @@ export async function initDb() {
       console.log('Successfully checked/added parent_id column to categories.');
     } catch (err) {}
 
-    const [categoryRows] = await connection.query('SELECT COUNT(*) as count FROM categories');
-    if (categoryRows[0].count === 0) {
-      console.log('Seeding default categories...');
+    const defaultCategoryLayout = [
+      ['motor', '????', null, 1],
+      ['reducer', '???', null, 2],
+      ['plc', 'PLC', null, 3],
+      ['robot', '??', 'motor', 1],
+      ['motion', '????/LM', 'motor', 2]
+    ];
+
+    for (const [id, name, parentId, sortOrder] of defaultCategoryLayout) {
       await connection.query(`
-        INSERT INTO categories (id, name, sort_order) VALUES
-        ('motor', '모터', 1),
-        ('reducer', '감속기', 2),
-        ('robot', '로봇', 3),
-        ('plc', 'PLC', 4),
-        ('motion', '볼스크류/LM', 5)
-      `);
-      console.log('Categories seeded.');
+        INSERT INTO categories (id, name, parent_id, sort_order)
+        VALUES (?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE
+          name = VALUES(name),
+          parent_id = VALUES(parent_id),
+          sort_order = VALUES(sort_order)
+      `, [id, name, parentId, sortOrder]);
     }
+    console.log('Default categories ensured.');
 
     // 2. products table
     await connection.query(`
@@ -310,6 +403,22 @@ export async function initDb() {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
+
+    // 7. cart_items table
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS cart_items (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        user_id VARCHAR(100) NOT NULL,
+        product_id VARCHAR(100) NOT NULL,
+        quantity INT NOT NULL DEFAULT 1,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_cart_user_product (user_id, product_id),
+        KEY idx_cart_user_updated (user_id, updated_at),
+        KEY idx_cart_product (product_id)
+      ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
     // Check and add carrier, tracking_number, confirmed_at columns to orders table if they don't exist
     const [columns] = await connection.query(`SHOW COLUMNS FROM orders`);
     const columnNames = columns.map(col => col.Field);
