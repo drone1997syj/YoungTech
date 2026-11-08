@@ -141,7 +141,7 @@ export async function initDb() {
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         UNIQUE KEY uq_user_provider (user_id, provider),
         UNIQUE KEY uq_provider_user (provider, provider_user_id)
-      ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
     `);
 
     await connection.query(`
@@ -151,7 +151,7 @@ export async function initDb() {
         address TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-      ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
     `);
 
     await connection.query(`
@@ -229,7 +229,7 @@ export async function initDb() {
         sort_order INT DEFAULT 0,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-      ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
     `);
 
     // Ensure sort_order exists in categories
@@ -308,7 +308,7 @@ export async function initDb() {
         is_active BOOLEAN DEFAULT TRUE,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-      ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
     `);
 
     // Ensure sort_order exists in products
@@ -385,7 +385,7 @@ export async function initDb() {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         UNIQUE KEY uq_cart_items_user_product (user_id, product_id)
-      ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
     `);
 
     // 5. analytics table
