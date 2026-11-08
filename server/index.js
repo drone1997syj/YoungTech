@@ -343,7 +343,7 @@ app.post('/api/auth/register/verify', async (req, res) => {
       return res.status(409).json({ message: '이미 가입된 이메일입니다. 로그인 또는 비밀번호 찾기를 이용해 주세요.' });
     }
 
-    const userId = user__;
+    const userId = `user_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
     const connection = await pool.getConnection();
     try {
       await connection.beginTransaction();
