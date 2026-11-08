@@ -40,10 +40,10 @@ const SPEC_TEMPLATE_PRESETS = {
 };
 
 const SPEC_TEMPLATE_LABELS = {
-  general: '??/??',
-  motor: '????',
+  general: '기본/기타',
+  motor: '모터',
   plc: 'PLC',
-  custom: '?? ??'
+  custom: '자유 입력'
 };
 
 const createSpecsFromTemplate = (templateKey = 'custom') => {
@@ -493,21 +493,21 @@ export default function AdminDashboard() {
   const createCategoryIdFromName = (name) => {
     const normalized = String(name || '').trim().toLowerCase();
     const knownIds = {
-      '????': 'motor',
-      '??': 'motor',
-      '???': 'reducer',
-      '??': 'robot',
-      '????/lm': 'motion',
-      '????': 'ball-screw',
-      '??????': 'servo-drive',
-      '???': 'cable',
-      '????': 'panasonic',
-      '????': 'mitsubishi',
-      '????': 'inovance',
-      '???': 'fastech',
-      '??': 'nidec',
-      '????': 'nikki-denso',
-      '??': 'moons',
+      '모터': 'motor',
+      '감속기': 'reducer',
+      '로봇': 'robot',
+      '볼스크류/lm': 'motion',
+      '볼스크류': 'ball-screw',
+      '서보모터': 'servo-motor',
+      '서보드라이브': 'servo-drive',
+      '케이블': 'cable',
+      '파나소닉': 'panasonic',
+      '미쓰비시': 'mitsubishi',
+      '이노밴스': 'inovance',
+      '파스텍': 'fastech',
+      '니덱': 'nidec',
+      '닛키덴소': 'nikki-denso',
+      '문스': 'moons',
       'rs automation': 'rs-automation'
     };
     const mappedId = knownIds[normalized];

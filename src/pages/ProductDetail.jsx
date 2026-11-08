@@ -18,11 +18,11 @@ import { useShop } from '../context/ShopContext';
 import './ProductDetail.css';
 
 const CATEGORY_LABELS = {
-  motor: '????',
-  reducer: '???',
-  robot: '??',
+  motor: '모터',
+  reducer: '감속기',
+  robot: '로봇',
   plc: 'PLC',
-  motion: '????/LM'
+  motion: '볼스크류/LM'
 };
 
 const formatCurrency = (value) => `${Number(value || 0).toLocaleString()}원`;

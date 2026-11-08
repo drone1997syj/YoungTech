@@ -253,11 +253,11 @@ export async function initDb() {
     } catch (err) {}
 
     const defaultCategoryLayout = [
-      ['motor', '????', null, 1],
-      ['reducer', '???', null, 2],
+      ['motor', '모터', null, 1],
+      ['reducer', '감속기', null, 2],
       ['plc', 'PLC', null, 3],
-      ['robot', '??', 'motor', 1],
-      ['motion', '????/LM', 'motor', 2]
+      ['robot', '로봇', 'motor', 1],
+      ['motion', '볼스크류/LM', 'motor', 2]
     ];
 
     for (const [id, name, parentId, sortOrder] of defaultCategoryLayout) {

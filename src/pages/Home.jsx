@@ -25,11 +25,11 @@ const BANNERS = [
 ];
 
 const CATEGORY_MAP = {
-  motor: '????',
-  reducer: '???',
-  robot: '??',
+  motor: '모터',
+  reducer: '감속기',
+  robot: '로봇',
   plc: 'PLC',
-  motion: '????/LM'
+  motion: '볼스크류/LM'
 };
 
 export default function Home() {
@@ -105,25 +105,25 @@ export default function Home() {
       {/* Category Grid Section */}
       <section className="section-categories py-12 bg-white">
         <div className="container">
-          <h3 className="section-title text-center text-dark font-bold text-2xl mb-8">?? ?? ????</h3>
+          <h3 className="section-title text-center text-dark font-bold text-2xl mb-8">핵심 제품 라인업</h3>
           <div className="grid grid-cols-3 gap-6">
             <div className="category-card cursor-pointer" onClick={() => navigate('productList')}>
               <div className="category-card-img bg-purple-50 flex items-center justify-center">
-                <img src="https://images.unsplash.com/photo-1616401784845-180882ba9ba8?auto=format&fit=crop&q=80&w=300" alt="????" />
+                <img src="https://images.unsplash.com/photo-1616401784845-180882ba9ba8?auto=format&fit=crop&q=80&w=300" alt="모터" />
               </div>
               <div className="category-card-body p-4 text-center">
-                <h4 className="font-bold text-dark mb-1">????</h4>
-                <p className="text-xs text-light">????, ???? ????</p>
+                <h4 className="font-bold text-dark mb-1">구동 모터 모듈</h4>
+                <p className="text-xs text-light">파나소닉, 미쓰비시 AC 서보모터 및 스텝모터</p>
               </div>
             </div>
 
             <div className="category-card cursor-pointer" onClick={() => navigate('productList')}>
               <div className="category-card-img bg-purple-50 flex items-center justify-center">
-                <img src="https://images.unsplash.com/photo-1555664424-778a1e5e1b48?auto=format&fit=crop&q=80&w=300" alt="???" />
+                <img src="https://images.unsplash.com/photo-1555664424-778a1e5e1b48?auto=format&fit=crop&q=80&w=300" alt="감속기 및 PLC" />
               </div>
               <div className="category-card-body p-4 text-center">
-                <h4 className="font-bold text-dark mb-1">???</h4>
-                <p className="text-xs text-light">SHIMPO ?? ???</p>
+                <h4 className="font-bold text-dark mb-1">감속기 & PLC 제어기</h4>
+                <p className="text-xs text-light">SHIMPO 유성 감속기 및 파나소닉 FP7 모션 PLC</p>
               </div>
             </div>
 
@@ -133,7 +133,7 @@ export default function Home() {
               </div>
               <div className="category-card-body p-4 text-center">
                 <h4 className="font-bold text-dark mb-1">PLC</h4>
-                <p className="text-xs text-light">???? FP7 ?? PLC</p>
+                <p className="text-xs text-light">ATRO 직교 로봇 모듈 및 THK 고정밀 LM 가이드</p>
               </div>
             </div>
           </div>

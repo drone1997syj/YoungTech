@@ -164,7 +164,7 @@ export const ShopProvider = ({ children }) => {
         ...(data && typeof data === 'object' ? data : {}),
         message: data && typeof data === 'object' && data.message
           ? data.message
-          : fallbackMessage || '?붿껌 泥섎━???ㅽ뙣?덉뒿?덈떎.',
+          : fallbackMessage || '요청 처리에 실패했습니다.',
         status: response.status,
         isWarning: data && typeof data === 'object' ? data.isWarning : undefined,
         rawResponse: rawText

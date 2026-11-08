@@ -25,8 +25,8 @@ export default function Footer() {
           <div className="footer-col">
             <h4 className="footer-col-title text-base font-semibold text-white mb-3">제품 카테고리</h4>
             <ul className="footer-links-list text-base">
-              <li><a href="/products?category=motor">????</a></li>
-              <li><a href="/products?category=reducer">???</a></li>
+              <li><a href="/products?category=motor">모터</a></li>
+              <li><a href="/products?category=reducer">감속기</a></li>
               <li><a href="/products?category=plc">PLC</a></li>
             </ul>
           </div>

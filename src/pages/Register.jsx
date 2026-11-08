@@ -98,7 +98,7 @@ export default function Register() {
 
   const validateForm = () => {
     if (!email || !password || !confirmPassword || !name) {
-      return '?? ?? ?? ??? ??? ???.';
+      return '모든 항목을 입력해 주세요.';
     }
     if (
       password.length < 8 ||
@@ -108,10 +108,10 @@ export default function Register() {
       !/\d/.test(password) ||
       !/[!@#$%^&*()_\-+=[\]{};':"\\|,.<>/?`~]/.test(password)
     ) {
-      return '????? 8? ?? 64? ???? ??, ??, ????? ?? ???? ???.';
+      return '비밀번호는 8자 이상 64자 이하이며, 영문, 숫자, 특수문자를 모두 포함해야 합니다.';
     }
     if (password !== confirmPassword) {
-      return '???? ????? ???? ????. ?? ??? ???.';
+      return '비밀번호가 일치하지 않습니다. 다시 확인해 주세요.';
     }
     return '';
   };

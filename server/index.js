@@ -242,11 +242,11 @@ app.post('/api/auth/register', async (req, res, next) => {
   const storedPhone = normalizedPhone || '';
 
   if (!normalizedEmail || !password || !normalizedName) {
-    return res.status(400).json({ message: '???, ????, ??? ?? ??? ???.' });
+    return res.status(400).json({ message: '이름, 이메일, 비밀번호를 모두 입력해 주세요.' });
   }
 
   if (storedPhone && !/^01\d{8,9}$/.test(storedPhone)) {
-    return res.status(400).json({ message: '??? ??? ???? ??? ???. ?: 010-1234-5678' });
+    return res.status(400).json({ message: '휴대폰 번호 형식이 올바르지 않습니다. 예: 010-1234-5678' });
   }
 
   const passwordError = validatePasswordPolicy(password, { email: normalizedEmail, name: normalizedName });
@@ -375,11 +375,11 @@ app.post('/api/auth/register', async (req, res) => {
   const storedPhone = normalizedPhone || '';
 
   if (!email || !password || !name) {
-    return res.status(400).json({ message: '???, ????, ??? ?? ??? ???.' });
+    return res.status(400).json({ message: '이름, 이메일, 비밀번호를 모두 입력해 주세요.' });
   }
 
   if (storedPhone && !/^01\d{8,9}$/.test(storedPhone)) {
-    return res.status(400).json({ message: '??? ??? ???? ??? ???.' });
+    return res.status(400).json({ message: '휴대폰 번호 형식이 올바르지 않습니다.' });
   }
 
   const passwordError = validatePasswordPolicy(password, { email, name });
@@ -425,7 +425,7 @@ app.post('/api/auth/login', async (req, res) => {
   try {
     const user = await getMergedUserByEmail(email);
     if (!user) {
-      return res.status(400).json({ message: '???? ?? ?????? ????? ?????.' });
+      return res.status(400).json({ message: '가입되지 않은 이메일이거나 비밀번호가 다릅니다.' });
     }
 
     const limit = getLoginLimitForRole(user.role);
@@ -469,8 +469,8 @@ app.post('/api/auth/login', async (req, res) => {
 
         const mailResult = await sendMail({
           to: user.email,
-          subject: '[YoungTech] ??? ?? ?? ????',
-          text: `YoungTech ??? ?? ?? ????? ${unlockCode} ???.\n\n????? ${UNLOCK_CODE_MINUTES}? ??? ??? ? ????.\n?? ??? ???? ????? ??? ???.`
+          subject: '[YoungTech] 로그인 제한 해제 인증번호',
+          text: `YoungTech 로그인 제한 해제 인증번호는 ${unlockCode} 입니다.\n\n인증번호는 ${UNLOCK_CODE_MINUTES}분 동안만 사용할 수 있습니다.\n본인이 로그인한 것이 아니라면 비밀번호를 변경하고 고객센터로 문의해 주세요.`
         });
 
         return res.status(423).json({
@@ -489,7 +489,7 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(400).json({
         message: failedCount >= 4
           ? `??? ?? ????? ???? ????. ??? ?? ${remaining}? ?? ?? ? ??? ????.`
-          : '???? ?? ?????? ????? ?????.',
+          : '가입되지 않은 이메일이거나 비밀번호가 다릅니다.',
         failedCount,
         remainingAttempts: remaining,
         showSecurityWarning: failedCount >= 4
@@ -727,7 +727,7 @@ app.post('/api/auth/verify-password-reset-code', async (req, res) => {
 app.post('/api/auth/reset-password', async (req, res) => {
   const { email } = req.body;
   if (!email) {
-    return res.status(400).json({ message: '???? ??? ???.' });
+    return res.status(400).json({ message: '잘못된 요청입니다.' });
   }
 
   try {
@@ -2067,14 +2067,14 @@ app.delete('/api/categories/:id', requireAdmin, async (req, res) => {
     const [prods] = await pool.query('SELECT COUNT(*) as count FROM products WHERE category = ? AND is_deleted = FALSE', [req.params.id]);
     if (prods[0].count > 0) {
       return res.status(400).json({
-        message: '?? ????? ??? ??? ?? ??? ? ????. ??? ????? ?? ????? ??? ???.'
+        message: '선택한 상품 중 일부를 찾을 수 없습니다. 목록을 새로고침한 뒤 다시 시도해 주세요.'
       });
     }
     await pool.query('DELETE FROM categories WHERE id = ?', [req.params.id]);
-    res.json({ success: true, message: '????? ???????.' });
+    res.json({ success: true, message: '처리가 완료되었습니다.' });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ message: '?? ??? ??????.' });
+    res.status(500).json({ message: '처리 중 오류가 발생했습니다.' });
   }
 });
 
@@ -2082,32 +2082,32 @@ app.put('/api/categories/:id', requireAdmin, async (req, res) => {
   const { name, parent_id, parentId } = req.body;
   const { id } = req.params;
   if (!name) {
-    return res.status(400).json({ message: '???? ??? ??? ???.' });
+    return res.status(400).json({ message: '상품을 찾을 수 없습니다.' });
   }
   try {
     const normalizedParentId = normalizeCategoryParentId(parent_id ?? parentId);
     if (normalizedParentId === id) {
-      return res.status(400).json({ message: '?? ????? ?? ??? ? ? ????.' });
+      return res.status(400).json({ message: '이 상품은 현재 품절 상태입니다.' });
     }
 
     if (normalizedParentId) {
       const [allCategories] = await pool.query('SELECT id, parent_id FROM categories');
       const descendantIds = getCategoryDescendantIds(allCategories, id);
       if (descendantIds.has(normalizedParentId)) {
-        return res.status(400).json({ message: '?? ????? ??? ??? ? ????.' });
+        return res.status(400).json({ message: '이 상품은 판매 중지 상태입니다.' });
       }
 
       const [parentRows] = await pool.query('SELECT id FROM categories WHERE id = ?', [normalizedParentId]);
       if (parentRows.length === 0) {
-        return res.status(400).json({ message: '??? ?? ????? ?? ? ????.' });
+        return res.status(400).json({ message: '삭제된 상품은 처리할 수 없습니다.' });
       }
     }
 
     await pool.query('UPDATE categories SET name = ?, parent_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [name, normalizedParentId, id]);
-    res.json({ success: true, message: '????? ???????.' });
+    res.json({ success: true, message: '처리가 완료되었습니다.' });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ message: '?? ??? ??????.' });
+    res.status(500).json({ message: '처리 중 오류가 발생했습니다.' });
   }
 });
 
