@@ -443,7 +443,7 @@ app.post('/auth/register', async (req, res, next) => {
   }
 
   if (storedPhone && !/^01\d{8,9}$/.test(storedPhone)) {
-    return res.status(400).json({ message: '??? ??? ???? ??? ???. ?: 010-1234-5678' });
+    return res.status(400).json({ message: '휴대폰 번호 형식이 올바르지 않습니다. 예: 010-1234-5678' });
   }
 
   const passwordError = validatePasswordPolicy(password, { email: normalizedEmail, name: normalizedName });
@@ -575,7 +575,7 @@ app.post('/auth/register', async (req, res) => {
   }
 
   if (storedPhone && !/^01\d{8,9}$/.test(storedPhone)) {
-    return res.status(400).json({ message: '??? ??? ???? ??? ???.' });
+    return res.status(400).json({ message: '휴대폰 번호 형식이 올바르지 않습니다.' });
   }
 
   const passwordError = validatePasswordPolicy(password, { email, name });
@@ -909,7 +909,7 @@ app.post('/api/auth/verify-password-reset-code', async (req, res) => {
     const hashedPassword = bcrypt.hashSync(newPassword, 10);
     const user = await getMergedUserByEmail(verification.email);
     if (!user) {
-      return res.status(404).json({ message: '?ъ슜?먮? 李얠쓣 ???놁뒿?덈떎.' });
+      return res.status(404).json({ message: '사용자를 찾을 수 없습니다.' });
     }
     await upsertLocalAuthIdentity(pool, user.id, verification.email, hashedPassword);
     await pool.query('UPDATE password_reset_verifications SET completed_at = NOW() WHERE id = ?', [verificationId]);
@@ -928,7 +928,7 @@ app.post('/api/auth/verify-password-reset-code', async (req, res) => {
 app.post('/api/auth/reset-password', async (req, res) => {
   const { email } = req.body;
   if (!email) {
-    return res.status(400).json({ message: '???? ??? ???.' });
+    return res.status(400).json({ message: '이메일을 입력해 주세요.' });
   }
 
   try {
@@ -2127,14 +2127,14 @@ app.delete('/api/categories/:id', requireAdmin, async (req, res) => {
     const [prods] = await pool.query('SELECT COUNT(*) as count FROM products WHERE category = ? AND is_deleted = FALSE', [req.params.id]);
     if (prods[0].count > 0) {
       return res.status(400).json({
-        message: '?? ????? ??? ??? ?? ??? ? ????. ??? ????? ?? ????? ??? ???.'
+        message: '선택한 상품 중 일부를 찾을 수 없습니다. 목록을 새로고침한 뒤 다시 시도해 주세요.'
       });
     }
     await pool.query('DELETE FROM categories WHERE id = ?', [req.params.id]);
-    res.json({ success: true, message: '????? ???????.' });
+    res.json({ success: true, message: '처리가 완료되었습니다.' });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ message: '?? ??? ??????.' });
+    res.status(500).json({ message: '처리 중 오류가 발생했습니다.' });
   }
 });
 
@@ -2142,32 +2142,32 @@ app.put('/api/categories/:id', requireAdmin, async (req, res) => {
   const { name, parent_id, parentId } = req.body;
   const { id } = req.params;
   if (!name) {
-    return res.status(400).json({ message: '???? ??? ??? ???.' });
+    return res.status(400).json({ message: '상품을 찾을 수 없습니다.' });
   }
   try {
     const normalizedParentId = normalizeCategoryParentId(parent_id ?? parentId);
     if (normalizedParentId === id) {
-      return res.status(400).json({ message: '?? ????? ?? ??? ? ? ????.' });
+      return res.status(400).json({ message: '이 상품은 현재 품절 상태입니다.' });
     }
 
     if (normalizedParentId) {
       const [allCategories] = await pool.query('SELECT id, parent_id FROM categories');
       const descendantIds = getCategoryDescendantIds(allCategories, id);
       if (descendantIds.has(normalizedParentId)) {
-        return res.status(400).json({ message: '?? ????? ??? ??? ? ????.' });
+        return res.status(400).json({ message: '이 상품은 판매 중지 상태입니다.' });
       }
 
       const [parentRows] = await pool.query('SELECT id FROM categories WHERE id = ?', [normalizedParentId]);
       if (parentRows.length === 0) {
-        return res.status(400).json({ message: '??? ?? ????? ?? ? ????.' });
+        return res.status(400).json({ message: '삭제된 상품은 처리할 수 없습니다.' });
       }
     }
 
     await pool.query('UPDATE categories SET name = ?, parent_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [name, normalizedParentId, id]);
-    res.json({ success: true, message: '????? ???????.' });
+    res.json({ success: true, message: '처리가 완료되었습니다.' });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ message: '?? ??? ??????.' });
+    res.status(500).json({ message: '처리 중 오류가 발생했습니다.' });
   }
 });
 
@@ -2580,7 +2580,7 @@ app.get('/api/cart/count', authenticateToken, async (req, res) => {
     res.json({ count });
   } catch (error) {
     console.error('Fetch Cart Count Error:', error);
-    res.status(500).json({ message: '?λ컮援щ땲 媛쒖닔瑜?遺덈윭?ㅼ? 紐삵뻽?듬땲??' });
+    res.status(500).json({ message: '멤버 개수를 불러오지 못했습니다.' });
   }
 });
 
@@ -2740,7 +2740,7 @@ app.post('/api/orders', authenticateToken, async (req, res) => {
     tax_note = ''
   } = req.body;
   if (!order_items || !address) {
-    return res.status(400).json({ message: '?? ??? ???????.' });
+    return res.status(400).json({ message: '주문을 처리할 수 없습니다.' });
   }
 
   const normalizedPaymentMethod = payment_method === 'mock_card' ? 'mock_card' : 'mock_card';
@@ -2757,7 +2757,7 @@ app.post('/api/orders', authenticateToken, async (req, res) => {
     await connection.beginTransaction();
 
     if (!Array.isArray(order_items) || order_items.length === 0) {
-      throw new Error('?? ?? ??? ???? ????.');
+      throw new Error('주문 항목이 올바르지 않습니다.');
     }
 
     const requestedItems = [];
@@ -2768,7 +2768,7 @@ app.post('/api/orders', authenticateToken, async (req, res) => {
       const quantity = Number(rawItem?.quantity);
 
       if (!productId) {
-        throw new Error('?? ?? ID? ???? ????.');
+        throw new Error('상품 ID가 올바르지 않습니다.');
       }
       if (!Number.isInteger(quantity)) {
         throw new Error(`??? ???? ???: ${productId}`);
@@ -2845,7 +2845,7 @@ app.post('/api/orders', authenticateToken, async (req, res) => {
     const serverTotalAmount = subtotalAmount + shippingFee;
     const clientTotalAmount = Number(total_amount);
     if (Number.isFinite(clientTotalAmount) && clientTotalAmount !== serverTotalAmount) {
-      throw new Error('?? ??? ???? ????. ?? ??? ???.');
+      throw new Error('주문 금액이 올바르지 않습니다. 다시 시도해 주세요.');
     }
 
     await connection.query(
@@ -2887,7 +2887,7 @@ app.post('/api/orders', authenticateToken, async (req, res) => {
 
     await connection.commit();
     res.json({
-      message: '??? ???????.',
+      message: '주문이 완료되었습니다.',
       orderId,
       totalAmount: serverTotalAmount,
       shippingFee,
@@ -2897,8 +2897,8 @@ app.post('/api/orders', authenticateToken, async (req, res) => {
   } catch (error) {
     await connection.rollback();
     console.error(error);
-    const message = error?.message || '?? ??? ??????.';
-    const statusCode = message === '?? ??? ??????.' ? 500 : 400;
+    const message = error?.message || '주문 처리 중 오류가 발생했습니다.';
+    const statusCode = message === '주문 처리 중 오류가 발생했습니다.' ? 500 : 400;
     res.status(statusCode).json({ message });
   } finally {
     connection.release();

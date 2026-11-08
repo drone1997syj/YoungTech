@@ -217,7 +217,7 @@ export default function Login() {
 
     const emailValue = resetPwEmail.trim();
     if (!emailValue) {
-      setResetError('???? ??? ???.');
+      setResetError('이메일을 입력해 주세요.');
       return;
     }
 
@@ -234,7 +234,7 @@ export default function Login() {
       const data = await res.json();
 
       if (!res.ok) {
-        setResetError(data.message || '???? ??? ??????.');
+        setResetError(data.message || '이메일 전송에 실패했습니다.');
         return;
       }
 
@@ -242,13 +242,13 @@ export default function Login() {
       setResetVerificationId(data.verificationId || '');
       setResetMaskedEmail(data.maskedEmail || emailValue);
       setResetDevCode(data.devVerificationCode || '');
-      setResetMessage(data.message || '???? ???? ????? ?????.');
+      setResetMessage(data.message || '인증번호가 발송되었습니다.');
       setResetCode('');
       setResetNewPassword('');
       setResetNewPasswordConfirm('');
     } catch (err) {
       console.error(err);
-      setResetError('?? ??? ??????.');
+      setResetError('오류가 발생했습니다.');
     } finally {
       setResetSubmitting(false);
     }
@@ -259,15 +259,15 @@ export default function Login() {
 
     const normalizedCode = resetCode.replace(/\D/g, '');
     if (normalizedCode.length !== 6) {
-      setResetError('???? 6??? ??? ???.');
+      setResetError('숫자 6자리를 입력해 주세요.');
       return;
     }
     if (!resetNewPassword || !resetNewPasswordConfirm) {
-      setResetError('? ????? ??? ???.');
+      setResetError('새 비밀번호를 입력해 주세요.');
       return;
     }
     if (resetNewPassword !== resetNewPasswordConfirm) {
-      setResetError('? ????? ???? ????.');
+      setResetError('새 비밀번호가 일치하지 않습니다.');
       return;
     }
 
@@ -288,18 +288,18 @@ export default function Login() {
       const data = await res.json();
 
       if (!res.ok) {
-        setResetError(data.message || '???? ??? ??????.');
+        setResetError(data.message || '비밀번호 변경에 실패했습니다.');
         return;
       }
 
-      setResetMessage(data.message || '????? ???????.');
+      setResetMessage(data.message || '비밀번호가 변경되었습니다.');
       setResetStep('done');
       setResetCode('');
       setResetNewPassword('');
       setResetNewPasswordConfirm('');
     } catch (err) {
       console.error(err);
-      setResetError('?? ??? ??????.');
+      setResetError('오류가 발생했습니다.');
     } finally {
       setResetSubmitting(false);
     }
@@ -616,7 +616,7 @@ export default function Login() {
         <div className="recovery-modal" onClick={() => closeResetPasswordModal()}>
           <div className="recovery-container recovery-container-reset animate-fade-in" onClick={(e) => e.stopPropagation()}>
             <div className="recovery-header">
-              <h3>{resetStep === 'done' ? '???? ?? ??' : '???? ??'}</h3>
+              <h3>{resetStep === 'done' ? '비밀번호 변경 완료' : '비밀번호 재설정'}</h3>
               <button
                 onClick={() => closeResetPasswordModal()}
                 className="text-slate-400 hover:text-slate-600 transition-colors"
@@ -632,8 +632,8 @@ export default function Login() {
                     <MailCheck size={20} />
                   </div>
                   <div>
-                    <b>{resetStep === 'verify' ? '???? ?? ????? ??? ???.' : '???? ????? ?????.'}</b>
-                    <p>{resetStep === 'verify' ? '????? ??? ? ? ????? ??? ? ????.' : '??? ??? ??? ???? ????? ?????.'}</p>
+                    <b>{resetStep === 'verify' ? '인증번호를 확인해 주세요.' : '인증번호가 발송되었습니다.'}</b>
+                    <p>{resetStep === 'verify' ? '메일함에서 인증번호를 확인한 뒤 아래에 입력해 주세요.' : '위 항목을 입력하면 비밀번호를 변경할 수 있습니다.'}</p>
                   </div>
                 </div>
 
@@ -768,7 +768,7 @@ export default function Login() {
                   </button>
                 ) : (
                   <button type="submit" className="btn-recovery-submit" disabled={resetSubmitting}>
-                    {resetSubmitting ? '?? ?...' : (resetStep === 'verify' ? '???? ??' : '???? ??')}
+                    {resetSubmitting ? '처리 중...' : (resetStep === 'verify' ? '인증번호 확인' : '비밀번호 변경')}
                   </button>
                 )}
               </div>
