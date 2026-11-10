@@ -287,7 +287,6 @@ export default function ProductDetail() {
   };
 
   const detailPrice = Number(product.price || 0);
-  const detailTotalPrice = detailPrice * quantity;
 
   return (
     <div className="product-detail-page">
@@ -424,17 +423,6 @@ export default function ProductDetail() {
                 <button type="button" onClick={() => handleQtyChange(quantity + 1)} className="detail-qty-btn">
                   +
                 </button>
-              </div>
-            </div>
-
-            <div className="detail-total-box">
-              <div className="detail-total-copy">
-                <span className="detail-purchase-label">총 수량</span>
-                <strong className="detail-total-count">총 {quantity.toLocaleString()}개</strong>
-              </div>
-              <div className="detail-total-price-wrap">
-                <span className="detail-purchase-label">총 금액</span>
-                <strong className="detail-total-price">{formatCurrency(detailTotalPrice)}</strong>
               </div>
             </div>
 

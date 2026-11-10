@@ -93,6 +93,8 @@ const getPublicBaseUrl = (req) => {
   return 'http://localhost:5000';
 };
 
+const getCanonicalFrontendBaseUrl = (req) => getPublicBaseUrl(req).replace(/\/$/, '');
+
 const isMailConfigured = () => Boolean(
   process.env.SMTP_HOST &&
   process.env.SMTP_PORT &&
@@ -231,18 +233,213 @@ function requireAdmin(req, res, next) {
   });
 }
 
+const parseJsonMaybe = (value, fallback = null) => {
+  if (value === null || value === undefined || value === '') return fallback;
+  if (typeof value !== 'string') return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return fallback;
+  }
+};
+
+const serializeCartItemRow = (row) => ({
+  id: row.id,
+  name: row.name,
+  category: row.category,
+  price: row.price,
+  image: row.image,
+  description: row.description,
+  specs: parseJsonMaybe(row.specs, row.specs || null),
+  stock: row.stock,
+  brand: row.brand,
+  is_active: Boolean(row.is_active),
+  quantity: row.quantity
+});
+
+const fetchCartItemsForUser = async (connection, userId) => {
+  const [rows] = await connection.query(`
+    SELECT
+      p.id,
+      p.name,
+      p.category,
+      p.price,
+      p.image,
+      p.description,
+      p.specs,
+      p.stock,
+      p.brand,
+      p.is_active,
+      ci.quantity
+    FROM cart_items ci
+    JOIN products p ON p.id = ci.product_id
+    WHERE ci.user_id = ? AND p.is_deleted = FALSE
+    ORDER BY ci.updated_at DESC, ci.id DESC
+  `, [userId]);
+
+  return rows.map(serializeCartItemRow);
+};
+
+const fetchCartCountForUser = async (connection, userId) => {
+  const [rows] = await connection.query(
+    `SELECT COALESCE(SUM(ci.quantity), 0) AS count
+     FROM cart_items ci
+     JOIN products p ON p.id = ci.product_id
+     WHERE ci.user_id = ? AND p.is_deleted = FALSE`,
+    [userId]
+  );
+  return Number(rows[0]?.count || 0);
+};
+
+const fetchActiveProductById = async (connection, productId) => {
+  const [rows] = await connection.query(
+    'SELECT id, name, category, price, image, description, specs, stock, brand, is_active FROM products WHERE id = ? AND is_deleted = FALSE',
+    [productId]
+  );
+  return rows[0] || null;
+};
+
+const AUTH_PROVIDER = {
+  LOCAL: 'local',
+  NAVER: 'naver',
+  KAKAO: 'kakao',
+  GOOGLE: 'google'
+};
+
+const normalizeEmailAddress = (email) => String(email || '').trim().toLowerCase();
+
+const mergeUserRecord = (userRow, identityRows = [], profileRow = null) => {
+  if (!userRow) return null;
+
+  const merged = {
+    ...userRow,
+    auth_password_hash: null,
+    phone: profileRow?.phone ?? userRow.phone ?? '',
+    address: profileRow?.address ?? userRow.address ?? ''
+  };
+
+  for (const identity of identityRows) {
+    if (identity.provider === AUTH_PROVIDER.LOCAL) {
+      merged.auth_password_hash = identity.password_hash || null;
+      continue;
+    }
+    if (identity.provider === AUTH_PROVIDER.NAVER) merged.naver_id = identity.provider_user_id;
+    if (identity.provider === AUTH_PROVIDER.KAKAO) merged.kakao_id = identity.provider_user_id;
+    if (identity.provider === AUTH_PROVIDER.GOOGLE) merged.google_id = identity.provider_user_id;
+  }
+
+  return merged;
+};
+
+const getMergedUserById = async (userId) => {
+  const [userRows] = await pool.query('SELECT * FROM users WHERE id = ?', [userId]);
+  if (userRows.length === 0) return null;
+  const [identityRows] = await pool.query('SELECT * FROM user_auth_identities WHERE user_id = ?', [userId]);
+  const [profileRows] = await pool.query('SELECT * FROM user_private_profiles WHERE user_id = ?', [userId]);
+  return mergeUserRecord(userRows[0], identityRows, profileRows[0] || null);
+};
+
+const getMergedUserByEmail = async (email) => {
+  const normalizedEmail = normalizeEmailAddress(email);
+  if (!normalizedEmail) return null;
+
+  const [userRows] = await pool.query('SELECT * FROM users WHERE email = ?', [normalizedEmail]);
+  if (userRows.length === 0) return null;
+
+  const user = userRows[0];
+  const [identityRows] = await pool.query('SELECT * FROM user_auth_identities WHERE user_id = ?', [user.id]);
+  const [profileRows] = await pool.query('SELECT * FROM user_private_profiles WHERE user_id = ?', [user.id]);
+  return mergeUserRecord(user, identityRows, profileRows[0] || null);
+};
+
+const getUserBySocialIdentity = async (provider, providerUserId) => {
+  const normalizedProviderUserId = String(providerUserId || '');
+  const [userRows] = await pool.query(
+    `SELECT u.*
+     FROM user_auth_identities ai
+     JOIN users u ON u.id = ai.user_id
+     WHERE ai.provider = ? AND ai.provider_user_id = ?
+     LIMIT 1`,
+    [provider, normalizedProviderUserId]
+  );
+
+  if (userRows.length > 0) {
+    return getMergedUserById(userRows[0].id);
+  }
+
+  const legacyColumn = `${provider}_id`;
+  const [legacyRows] = await pool.query(`SELECT * FROM users WHERE ${legacyColumn} = ? LIMIT 1`, [normalizedProviderUserId]);
+  if (legacyRows.length === 0) return null;
+  return getMergedUserById(legacyRows[0].id);
+};
+
+const upsertLocalAuthIdentity = async (executor, userId, email, passwordHash) => {
+  await executor.query(
+    `INSERT INTO user_auth_identities (user_id, provider, provider_user_id, password_hash)
+     VALUES (?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE
+       provider_user_id = VALUES(provider_user_id),
+       password_hash = VALUES(password_hash)`,
+    [userId, AUTH_PROVIDER.LOCAL, normalizeEmailAddress(email), passwordHash]
+  );
+
+  await executor.query('UPDATE users SET password = ? WHERE id = ?', [passwordHash, userId]);
+};
+
+const upsertSocialAuthIdentity = async (executor, userId, provider, providerUserId) => {
+  const normalizedProviderUserId = String(providerUserId || '');
+  await executor.query(
+    `INSERT INTO user_auth_identities (user_id, provider, provider_user_id)
+     VALUES (?, ?, ?)
+     ON DUPLICATE KEY UPDATE provider_user_id = VALUES(provider_user_id)`,
+    [userId, provider, normalizedProviderUserId]
+  );
+
+  const columnName = `${provider}_id`;
+  await executor.query(`UPDATE users SET ${columnName} = ? WHERE id = ?`, [normalizedProviderUserId, userId]);
+};
+
+const upsertPrivateProfile = async (executor, userId, phone, address) => {
+  const normalizedPhone = phone === undefined ? undefined : String(phone || '').replace(/\D/g, '');
+  const normalizedAddress = address === undefined ? undefined : String(address || '').trim();
+
+  await executor.query(
+    `INSERT INTO user_private_profiles (user_id, phone, address)
+     VALUES (?, ?, ?)
+     ON DUPLICATE KEY UPDATE
+       phone = COALESCE(VALUES(phone), phone),
+       address = COALESCE(VALUES(address), address)`,
+    [userId, normalizedPhone ?? null, normalizedAddress ?? null]
+  );
+
+  const updates = [];
+  const params = [];
+  if (normalizedPhone !== undefined) {
+    updates.push('phone = ?');
+    params.push(normalizedPhone);
+  }
+  if (normalizedAddress !== undefined) {
+    updates.push('address = ?');
+    params.push(normalizedAddress);
+  }
+  if (updates.length > 0) {
+    params.push(userId);
+    await executor.query(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`, params);
+  }
+};
+
 // ==========================================
 // Authentication APIs
 // ==========================================
-app.post('/api/auth/register', async (req, res, next) => {
+app.post('/auth/register', async (req, res, next) => {
   const { email, password, name, phone } = req.body;
-  const normalizedEmail = String(email || '').trim().toLowerCase();
+  const normalizedEmail = normalizeEmailAddress(email);
   const normalizedName = String(name || '').trim();
   const normalizedPhone = String(phone || '').replace(/\D/g, '');
   const storedPhone = normalizedPhone || '';
 
   if (!normalizedEmail || !password || !normalizedName) {
-    return res.status(400).json({ message: '이름, 이메일, 비밀번호를 모두 입력해 주세요.' });
+    return res.status(400).json({ message: '???, ????, ??? ?? ??? ???.' });
   }
 
   if (storedPhone && !/^01\d{8,9}$/.test(storedPhone)) {
@@ -255,9 +452,8 @@ app.post('/api/auth/register', async (req, res, next) => {
   }
 
   try {
-    const [existing] = await pool.query('SELECT * FROM users WHERE email = ?', [normalizedEmail]);
-    if (existing.length > 0) {
-      const existingUser = existing[0];
+    const existingUser = await getMergedUserByEmail(normalizedEmail);
+    if (existingUser) {
       const hasSocialLogin = Boolean(existingUser.naver_id || existingUser.kakao_id || existingUser.google_id);
       return res.status(400).json({
         message: hasSocialLogin
@@ -299,7 +495,7 @@ app.post('/api/auth/register', async (req, res, next) => {
   }
 });
 
-app.post('/api/auth/register/verify', async (req, res) => {
+app.post('/auth/register/verify', async (req, res) => {
   const { verificationId, code } = req.body;
   const normalizedCode = String(code || '').replace(/\D/g, '');
 
@@ -337,8 +533,8 @@ app.post('/api/auth/register/verify', async (req, res) => {
       });
     }
 
-    const [existing] = await pool.query('SELECT id FROM users WHERE email = ?', [verification.email]);
-    if (existing.length > 0) {
+    const existingUser = await getMergedUserByEmail(verification.email);
+    if (existingUser) {
       await pool.query('UPDATE signup_email_verifications SET completed_at = NOW() WHERE id = ?', [verificationId]);
       return res.status(409).json({ message: '이미 가입된 이메일입니다. 로그인 또는 비밀번호 찾기를 이용해 주세요.' });
     }
@@ -349,15 +545,15 @@ app.post('/api/auth/register/verify', async (req, res) => {
       await connection.beginTransaction();
       await connection.query(
         'INSERT INTO users (id, email, password, name, phone, role) VALUES (?, ?, ?, ?, ?, ?)',
-        [userId, verification.email, null, verification.name, verification.phone, 'user']
+        [userId, verification.email, verification.password_hash, verification.name, verification.phone, 'user']
       );
       await upsertLocalAuthIdentity(connection, userId, verification.email, verification.password_hash);
-      await upsertPrivateProfile(connection, userId, verification.phone, '');
+      await upsertPrivateProfile(connection, userId, verification.phone || '', '');
       await connection.query('UPDATE signup_email_verifications SET completed_at = NOW() WHERE id = ?', [verificationId]);
       await connection.commit();
-    } catch (txError) {
+    } catch (transactionError) {
       await connection.rollback();
-      throw txError;
+      throw transactionError;
     } finally {
       connection.release();
     }
@@ -369,13 +565,13 @@ app.post('/api/auth/register/verify', async (req, res) => {
   }
 });
 
-app.post('/api/auth/register', async (req, res) => {
+app.post('/auth/register', async (req, res) => {
   const { email, password, name, phone } = req.body;
   const normalizedPhone = String(phone || '').replace(/\D/g, '');
   const storedPhone = normalizedPhone || '';
 
   if (!email || !password || !name) {
-    return res.status(400).json({ message: '이름, 이메일, 비밀번호를 모두 입력해 주세요.' });
+    return res.status(400).json({ message: '???, ????, ??? ?? ??? ???.' });
   }
 
   if (storedPhone && !/^01\d{8,9}$/.test(storedPhone)) {
@@ -398,10 +594,9 @@ app.post('/api/auth/register', async (req, res) => {
 
     await pool.query(
       'INSERT INTO users (id, email, password, name, phone, role) VALUES (?, ?, ?, ?, ?, ?)',
-      [userId, email, null, name, storedPhone, 'user']
+      [userId, email, hashedPassword, name, storedPhone, 'user']
     );
-    await upsertLocalAuthIdentity(pool, userId, email, hashedPassword);
-    await upsertPrivateProfile(pool, userId, storedPhone, '');
+
     res.status(201).json({ message: '회원가입이 완료되었습니다.' });
   } catch (error) {
     console.error(error);
@@ -427,7 +622,6 @@ app.post('/api/auth/login', async (req, res) => {
     if (!user) {
       return res.status(400).json({ message: '가입되지 않은 이메일이거나 비밀번호가 다릅니다.' });
     }
-
     const limit = getLoginLimitForRole(user.role);
     const lockedUntil = user.locked_until ? new Date(user.locked_until) : null;
 
@@ -449,7 +643,7 @@ app.post('/api/auth/login', async (req, res) => {
       user.login_failed_count = 0;
     }
 
-    const passwordHash = user.auth_password_hash || user.legacy_password || '';
+    const passwordHash = user.auth_password_hash || user.password;
     const passwordMatch = passwordHash ? bcrypt.compareSync(password, passwordHash) : false;
     if (!passwordMatch) {
       const failedCount = Number(user.login_failed_count || 0) + 1;
@@ -488,7 +682,7 @@ app.post('/api/auth/login', async (req, res) => {
       const remaining = limit - failedCount;
       return res.status(400).json({
         message: failedCount >= 4
-          ? `??? ?? ????? ???? ????. ??? ?? ${remaining}? ?? ?? ? ??? ????.`
+          ? `이메일 또는 비밀번호가 일치하지 않습니다. 보안을 위해 ${remaining}회 추가 실패 시 계정이 잠깁니다.`
           : '가입되지 않은 이메일이거나 비밀번호가 다릅니다.',
         failedCount,
         remainingAttempts: remaining,
@@ -496,7 +690,10 @@ app.post('/api/auth/login', async (req, res) => {
       });
     }
 
-    await pool.query('UPDATE users SET login_failed_count = 0, locked_until = NULL, unlock_code_hash = NULL, unlock_code_expires_at = NULL WHERE id = ?', [user.id]);
+    await pool.query(
+      'UPDATE users SET login_failed_count = 0, locked_until = NULL, unlock_code_hash = NULL, unlock_code_expires_at = NULL WHERE id = ?',
+      [user.id]
+    );
 
     const token = jwt.sign(
       { id: user.id, email: user.email, name: user.name, role: user.role },
@@ -622,15 +819,15 @@ app.post('/api/auth/find-id', async (req, res) => {
 // 비밀번호 찾기 인증번호 발급 API
 app.post('/api/auth/request-password-reset-code', async (req, res) => {
   const { email } = req.body;
-  const normalizedEmail = String(email || '').trim().toLowerCase();
+  const normalizedEmail = normalizeEmailAddress(email);
 
   if (!normalizedEmail) {
     return res.status(400).json({ message: '이메일을 입력해 주세요.' });
   }
 
   try {
-    const [rows] = await pool.query('SELECT id FROM users WHERE email = ?', [normalizedEmail]);
-    if (rows.length === 0) {
+    const user = await getMergedUserByEmail(normalizedEmail);
+    if (!user) {
       return res.status(404).json({ message: '가입된 이메일을 찾을 수 없습니다.' });
     }
 
@@ -710,7 +907,11 @@ app.post('/api/auth/verify-password-reset-code', async (req, res) => {
     }
 
     const hashedPassword = bcrypt.hashSync(newPassword, 10);
-    await pool.query('UPDATE users SET password = ? WHERE email = ?', [hashedPassword, verification.email]);
+    const user = await getMergedUserByEmail(verification.email);
+    if (!user) {
+      return res.status(404).json({ message: '사용자를 찾을 수 없습니다.' });
+    }
+    await upsertLocalAuthIdentity(pool, user.id, verification.email, hashedPassword);
     await pool.query('UPDATE password_reset_verifications SET completed_at = NOW() WHERE id = ?', [verificationId]);
 
     res.json({
@@ -727,22 +928,22 @@ app.post('/api/auth/verify-password-reset-code', async (req, res) => {
 app.post('/api/auth/reset-password', async (req, res) => {
   const { email } = req.body;
   if (!email) {
-    return res.status(400).json({ message: '잘못된 요청입니다.' });
+    return res.status(400).json({ message: '이메일을 입력해 주세요.' });
   }
 
   try {
-    const [rows] = await pool.query('SELECT id FROM users WHERE email = ?', [email.trim()]);
-    if (rows.length === 0) {
+    const user = await getMergedUserByEmail(email.trim());
+    if (!user) {
       return res.status(404).json({ message: '입력하신 정보와 일치하는 가입 정보가 없습니다.' });
     }
 
-    const userId = rows[0].id;
+    const userId = user.id;
     // 8자리 임시 비밀번호 난수 생성
     const tempPassword = createTemporaryPassword();
     const hashedTempPassword = bcrypt.hashSync(tempPassword, 10);
 
     // 비밀번호 업데이트
-    await pool.query('UPDATE users SET password = ? WHERE id = ?', [hashedTempPassword, userId]);
+    await upsertLocalAuthIdentity(pool, userId, email.trim(), hashedTempPassword);
     const mailResult = await sendMail({
       to: email.trim(),
       subject: '[YoungTech] 임시 비밀번호 안내',
@@ -763,11 +964,19 @@ app.post('/api/auth/reset-password', async (req, res) => {
 
 app.get('/api/auth/me', authenticateToken, async (req, res) => {
   try {
-    const [rows] = await pool.query('SELECT id, email, name, role, created_at, phone, address FROM users WHERE id = ?', [req.user.id]);
-    if (rows.length === 0) {
+    const user = await getMergedUserById(req.user.id);
+    if (!user) {
       return res.status(404).json({ message: '사용자를 찾을 수 없습니다.' });
     }
-    res.json(rows[0]);
+    res.json({
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      created_at: user.created_at,
+      phone: user.phone,
+      address: user.address
+    });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: '서버 내부 오류' });
@@ -795,175 +1004,6 @@ const sanitizeUser = (user) => ({
   name: user.name,
   role: user.role
 });
-
-const AUTH_PROVIDER = {
-  local: 'local',
-  naver: 'naver',
-  kakao: 'kakao',
-  google: 'google'
-};
-
-const normalizeEmailAddress = (email = '') => String(email || '').trim().toLowerCase();
-
-const getMergedUserById = async (userId) => {
-  const [rows] = await pool.query(
-    `SELECT
-       u.id,
-       u.email,
-       u.name,
-       u.role,
-       u.created_at,
-       u.login_failed_count,
-       u.locked_until,
-       u.unlock_code_hash,
-       u.unlock_code_expires_at,
-       COALESCE(p.phone, u.phone) AS phone,
-       COALESCE(p.address, u.address) AS address,
-       a.password_hash AS auth_password_hash,
-       u.password AS legacy_password,
-       u.naver_id,
-       u.kakao_id,
-       u.google_id
-     FROM users u
-     LEFT JOIN user_private_profiles p ON p.user_id = u.id
-     LEFT JOIN user_auth_identities a ON a.user_id = u.id AND a.provider = ?
-     WHERE u.id = ?
-     LIMIT 1`,
-    [AUTH_PROVIDER.local, userId]
-  );
-  return rows[0] || null;
-};
-
-const getMergedUserByEmail = async (email) => {
-  const normalizedEmail = normalizeEmailAddress(email);
-  if (!normalizedEmail) return null;
-  const [rows] = await pool.query(
-    `SELECT
-       u.id,
-       u.email,
-       u.name,
-       u.role,
-       u.created_at,
-       u.login_failed_count,
-       u.locked_until,
-       u.unlock_code_hash,
-       u.unlock_code_expires_at,
-       COALESCE(p.phone, u.phone) AS phone,
-       COALESCE(p.address, u.address) AS address,
-       a.password_hash AS auth_password_hash,
-       u.password AS legacy_password,
-       u.naver_id,
-       u.kakao_id,
-       u.google_id
-     FROM users u
-     LEFT JOIN user_private_profiles p ON p.user_id = u.id
-     LEFT JOIN user_auth_identities a ON a.user_id = u.id AND a.provider = ?
-     WHERE u.email = ?
-     LIMIT 1`,
-    [AUTH_PROVIDER.local, normalizedEmail]
-  );
-  return rows[0] || null;
-};
-
-const getUserBySocialIdentity = async (provider, providerUserId) => {
-  const [rows] = await pool.query(
-    `SELECT
-       u.id,
-       u.email,
-       u.name,
-       u.role,
-       u.created_at,
-       COALESCE(p.phone, u.phone) AS phone,
-       COALESCE(p.address, u.address) AS address,
-       a.password_hash AS auth_password_hash,
-       a.provider_user_id,
-       u.naver_id,
-       u.kakao_id,
-       u.google_id
-     FROM user_auth_identities a
-     INNER JOIN users u ON u.id = a.user_id
-     LEFT JOIN user_private_profiles p ON p.user_id = u.id
-     WHERE a.provider = ? AND a.provider_user_id = ?
-     LIMIT 1`,
-    [provider, providerUserId]
-  );
-  return rows[0] || null;
-};
-
-const getLegacySocialUserByProvider = async (provider, providerUserId) => {
-  const columnMap = {
-    [AUTH_PROVIDER.naver]: 'naver_id',
-    [AUTH_PROVIDER.kakao]: 'kakao_id',
-    [AUTH_PROVIDER.google]: 'google_id'
-  };
-  const column = columnMap[provider];
-  if (!column) return null;
-  const [rows] = await pool.query(`SELECT * FROM users WHERE ${column} = ? LIMIT 1`, [providerUserId]);
-  return rows[0] || null;
-};
-
-const upsertLocalAuthIdentity = async (connection, userId, email, passwordHash) => {
-  await connection.query(
-    `INSERT INTO user_auth_identities (user_id, provider, provider_user_id, password_hash)
-     VALUES (?, ?, ?, ?)
-     ON DUPLICATE KEY UPDATE
-       provider_user_id = VALUES(provider_user_id),
-       password_hash = VALUES(password_hash),
-       updated_at = CURRENT_TIMESTAMP`,
-    [userId, AUTH_PROVIDER.local, normalizeEmailAddress(email), passwordHash]
-  );
-};
-
-const upsertSocialAuthIdentity = async (connection, userId, provider, providerUserId) => {
-  await connection.query(
-    `INSERT INTO user_auth_identities (user_id, provider, provider_user_id, password_hash)
-     VALUES (?, ?, ?, NULL)
-     ON DUPLICATE KEY UPDATE
-       provider_user_id = VALUES(provider_user_id),
-       password_hash = NULL,
-       updated_at = CURRENT_TIMESTAMP`,
-    [userId, provider, String(providerUserId || '').trim()]
-  );
-};
-
-const upsertPrivateProfile = async (connection, userId, phone = '', address = '') => {
-  const normalizedPhone = String(phone || '').replace(/\D/g, '');
-  const normalizedAddress = String(address || '').trim();
-  await connection.query(
-    `INSERT INTO user_private_profiles (user_id, phone, address)
-     VALUES (?, ?, ?)
-     ON DUPLICATE KEY UPDATE
-       phone = VALUES(phone),
-       address = VALUES(address),
-       updated_at = CURRENT_TIMESTAMP`,
-    [userId, normalizedPhone || null, normalizedAddress || null]
-  );
-  await connection.query('UPDATE users SET phone = ?, address = ? WHERE id = ?', [normalizedPhone || null, normalizedAddress || null, userId]);
-};
-
-const syncLegacyAuthColumns = async (connection, userId, updates = {}) => {
-  const setParts = [];
-  const values = [];
-  if (Object.prototype.hasOwnProperty.call(updates, 'password')) {
-    setParts.push('password = ?');
-    values.push(updates.password);
-  }
-  if (Object.prototype.hasOwnProperty.call(updates, 'naver_id')) {
-    setParts.push('naver_id = ?');
-    values.push(updates.naver_id);
-  }
-  if (Object.prototype.hasOwnProperty.call(updates, 'kakao_id')) {
-    setParts.push('kakao_id = ?');
-    values.push(updates.kakao_id);
-  }
-  if (Object.prototype.hasOwnProperty.call(updates, 'google_id')) {
-    setParts.push('google_id = ?');
-    values.push(updates.google_id);
-  }
-  if (setParts.length === 0) return;
-  values.push(userId);
-  await connection.query(`UPDATE users SET ${setParts.join(', ')} WHERE id = ?`, values);
-};
 
 const getDisplayNameFromProfile = (name, email) => {
   const trimmedName = String(name || '').trim();
@@ -1081,30 +1121,29 @@ app.post('/api/auth/link-social', async (req, res) => {
       return res.status(400).json({ message: '지원하지 않는 간편로그인 제공자입니다.' });
     }
 
-    const [rows] = await pool.query('SELECT * FROM users WHERE email = ?', [payload.email]);
-    if (rows.length === 0) {
+    const user = await getMergedUserByEmail(payload.email);
+    if (!user) {
       return res.status(404).json({ message: '연결할 영테크 계정을 찾을 수 없습니다.' });
     }
-
-    const user = rows[0];
-    const passwordMatch = bcrypt.compareSync(password, user.password);
+    const passwordHash = user.auth_password_hash || user.password;
+    const passwordMatch = passwordHash ? bcrypt.compareSync(password, passwordHash) : false;
     if (!passwordMatch) {
       return res.status(401).json({ message: '영테크 비밀번호가 일치하지 않습니다.' });
     }
 
-    await pool.query(`UPDATE users SET ${config.idColumn} = ? WHERE id = ?`, [payload.providerUserId, user.id]);
+    await upsertSocialAuthIdentity(pool, user.id, payload.provider, payload.providerUserId);
     await pool.query(
       'INSERT INTO social_link_history (user_id, provider, provider_user_id, method, result) VALUES (?, ?, ?, ?, ?)',
       [user.id, payload.provider, payload.providerUserId, 'password', 'linked']
     );
-    const [updatedRows] = await pool.query('SELECT * FROM users WHERE id = ?', [user.id]);
+    const updatedUser = await getMergedUserById(user.id);
     await sendMail({
-      to: updatedRows[0].email,
+      to: updatedUser.email,
       subject: '[YoungTech] 간편로그인 연결 완료 안내',
       text: `${config.label} 간편로그인이 YoungTech 계정에 연결되었습니다.\n\n본인이 연결한 것이 아니라면 즉시 비밀번호를 변경하고 고객센터로 문의해 주세요.`
     });
 
-    return completeSocialLogin(res, updatedRows[0], {
+    return completeSocialLogin(res, updatedUser, {
       linked: true,
       message: `${config.label} 간편로그인이 기존 영테크 계정에 연결되었습니다. 연결 완료 알림이 기존 이메일로 발송되었습니다.`
     });
@@ -1134,12 +1173,10 @@ app.post('/api/auth/link-social-confirm', async (req, res) => {
       return res.status(400).json({ message: '지원하지 않는 간편로그인 제공자입니다.' });
     }
 
-    const [rows] = await pool.query('SELECT * FROM users WHERE email = ?', [payload.email]);
-    if (rows.length === 0) {
+    const user = await getMergedUserByEmail(payload.email);
+    if (!user) {
       return res.status(404).json({ message: '연결할 영테크 계정을 찾을 수 없습니다.' });
     }
-
-    const user = rows[0];
     if (user.role === 'admin') {
       return res.status(403).json({ message: '관리자 계정은 확인만으로 간편로그인을 연결할 수 없습니다. 비밀번호 확인이 필요합니다.' });
     }
@@ -1148,20 +1185,20 @@ app.post('/api/auth/link-social-confirm', async (req, res) => {
       return res.status(409).json({ message: `이미 다른 ${config.label} 계정이 연결되어 있습니다. 이메일 인증을 다시 진행해 주세요.` });
     }
 
-    await pool.query(`UPDATE users SET ${config.idColumn} = ? WHERE id = ?`, [payload.providerUserId, user.id]);
+    await upsertSocialAuthIdentity(pool, user.id, payload.provider, payload.providerUserId);
     await pool.query(
       'INSERT INTO social_link_history (user_id, provider, provider_user_id, method, result) VALUES (?, ?, ?, ?, ?)',
       [user.id, payload.provider, payload.providerUserId, 'confirm', 'linked']
     );
 
-    const [updatedRows] = await pool.query('SELECT * FROM users WHERE id = ?', [user.id]);
+    const updatedUser = await getMergedUserById(user.id);
     await sendMail({
-      to: updatedRows[0].email,
+      to: updatedUser.email,
       subject: '[YoungTech] 간편로그인 연결 완료 안내',
       text: `${config.label} 간편로그인이 YoungTech 계정에 연결되었습니다.\n\n본인이 연결한 것이 아니라면 즉시 비밀번호를 변경하고 고객센터로 문의해 주세요.`
     });
 
-    return completeSocialLogin(res, updatedRows[0], {
+    return completeSocialLogin(res, updatedUser, {
       linked: true,
       message: `${config.label} 간편로그인이 기존 영테크 계정에 연결되었습니다.`
     });
@@ -1218,31 +1255,29 @@ app.post('/api/auth/link-social-email', async (req, res) => {
       });
     }
 
-    const [userRows] = await pool.query('SELECT * FROM users WHERE id = ? AND email = ?', [verification.user_id, verification.email]);
-    if (userRows.length === 0) {
+    const user = await getMergedUserById(verification.user_id);
+    if (!user || user.email !== verification.email) {
       return res.status(404).json({ message: '연결할 영테크 계정을 찾을 수 없습니다.' });
     }
-
-    const user = userRows[0];
     if (user.role === 'admin') {
       return res.status(403).json({ message: '관리자 계정은 이메일 인증만으로 간편로그인을 연결할 수 없습니다.' });
     }
 
-    await pool.query(`UPDATE users SET ${config.idColumn} = ? WHERE id = ?`, [verification.provider_user_id, user.id]);
+    await upsertSocialAuthIdentity(pool, user.id, verification.provider, verification.provider_user_id);
     await pool.query('UPDATE social_link_verifications SET completed_at = NOW() WHERE id = ?', [linkId]);
     await pool.query(
       'INSERT INTO social_link_history (user_id, provider, provider_user_id, method, result) VALUES (?, ?, ?, ?, ?)',
       [user.id, verification.provider, verification.provider_user_id, 'email', 'linked']
     );
 
-    const [updatedRows] = await pool.query('SELECT * FROM users WHERE id = ?', [user.id]);
+    const updatedUser = await getMergedUserById(user.id);
     await sendMail({
-      to: updatedRows[0].email,
+      to: updatedUser.email,
       subject: '[YoungTech] 간편로그인 연결 완료 안내',
       text: `${config.label} 간편로그인이 YoungTech 계정에 연결되었습니다.\n\n본인이 연결한 것이 아니라면 즉시 비밀번호를 변경하고 고객센터로 문의해 주세요.`
     });
 
-    return completeSocialLogin(res, updatedRows[0], {
+    return completeSocialLogin(res, updatedUser, {
       linked: true,
       message: `${config.label} 간편로그인이 기존 영테크 계정에 연결되었습니다. 연결 완료 알림이 기존 이메일로 발송되었습니다.`
     });
@@ -1333,8 +1368,9 @@ app.post('/api/auth/naver', async (req, res) => {
       }
 
       if (isMock && user.email === naverUser.email && String(user.naver_id || '').startsWith('naver_')) {
-        await pool.query('UPDATE users SET naver_id = ? WHERE id = ?', [naverUser.id, user.id]);
-        return completeSocialLogin(res, { ...user, naver_id: naverUser.id }, {
+        await upsertSocialAuthIdentity(pool, user.id, AUTH_PROVIDER.NAVER, naverUser.id);
+        const updatedUser = await getMergedUserById(user.id);
+        return completeSocialLogin(res, updatedUser, {
           linked: false,
           message: '네이버 계정 연결 정보를 최신 상태로 보정하고 로그인했습니다.'
         });
@@ -1355,6 +1391,7 @@ app.post('/api/auth/naver', async (req, res) => {
       'INSERT INTO users (id, naver_id, email, password, name, role) VALUES (?, ?, ?, ?, ?, ?)',
       [tempUserId, naverUser.id, naverUser.email, tempPasswordHash, naverUser.name, 'user']
     );
+    await upsertSocialAuthIdentity(pool, tempUserId, AUTH_PROVIDER.NAVER, naverUser.id);
 
     const token = jwt.sign(
       { id: tempUserId, email: naverUser.email, name: naverUser.name, role: 'user' },
@@ -1383,7 +1420,7 @@ app.post('/api/auth/naver', async (req, res) => {
 
 // Kakao Social Login API
 app.post('/api/auth/kakao', async (req, res) => {
-  const { code, state } = req.body;
+  const { code, state, redirectUri: requestRedirectUri } = req.body;
   if (!code) {
     return res.status(400).json({ message: '인가 코드가 누락되었습니다.' });
   }
@@ -1404,8 +1441,7 @@ app.post('/api/auth/kakao', async (req, res) => {
   } else {
     try {
       const tokenUrl = 'https://kauth.kakao.com/oauth/token';
-      const redirectBaseUrl = (req.headers.origin || process.env.PUBLIC_BASE_URL || getPublicBaseUrl(req)).replace(/\/$/, '');
-      const redirectUri = `${redirectBaseUrl}/oauth/callback/kakao`;
+      const redirectUri = (requestRedirectUri || `${getCanonicalFrontendBaseUrl(req)}/oauth/callback/kakao`).trim();
       
       const params = new URLSearchParams();
       params.append('grant_type', 'authorization_code');
@@ -1496,6 +1532,7 @@ app.post('/api/auth/kakao', async (req, res) => {
       'INSERT INTO users (id, kakao_id, email, password, name, role) VALUES (?, ?, ?, ?, ?, ?)',
       [tempUserId, kakaoUser.id, kakaoUser.email, tempPasswordHash, kakaoUser.name, 'user']
     );
+    await upsertSocialAuthIdentity(pool, tempUserId, AUTH_PROVIDER.KAKAO, kakaoUser.id);
 
     const token = jwt.sign(
       { id: tempUserId, email: kakaoUser.email, name: kakaoUser.name, role: 'user' },
@@ -1522,9 +1559,29 @@ app.post('/api/auth/kakao', async (req, res) => {
   }
 });
 
+app.get('/api/admin/users', requireAdmin, async (_req, res) => {
+  try {
+    const [users] = await pool.query(
+      `SELECT
+         id,
+         email,
+         name,
+         role,
+         created_at
+       FROM users
+       ORDER BY created_at DESC, id DESC`
+    );
+
+    res.json(users);
+  } catch (err) {
+    console.error('Admin Users List Error:', err);
+    res.status(500).json({ message: '회원 목록을 불러오지 못했습니다.' });
+  }
+});
+
 // Google Social Login API
 app.post('/api/auth/google', async (req, res) => {
-  const { code, state, accessToken, credential, allowSignup = false } = req.body;
+  const { code, state, accessToken, credential, allowSignup = false, redirectUri: requestRedirectUri } = req.body;
 
   const clientId = (process.env.GOOGLE_CLIENT_ID || process.env.VITE_GOOGLE_CLIENT_ID || '').trim();
   const clientSecret = (process.env.GOOGLE_CLIENT_SECRET || '').trim();
@@ -1582,7 +1639,7 @@ app.post('/api/auth/google', async (req, res) => {
     try {
       const tokenUrl = 'https://oauth2.googleapis.com/token';
       const reqOrigin = req.headers.origin || `http://${req.headers.host}` || 'http://localhost:5174';
-      const redirectUri = `${reqOrigin}/oauth/callback/google`;
+      const redirectUri = (requestRedirectUri || `${reqOrigin}/oauth/callback/google`).trim();
 
       const params = new URLSearchParams({
         code,
@@ -1681,6 +1738,7 @@ app.post('/api/auth/google', async (req, res) => {
       'INSERT INTO users (id, google_id, email, password, name, role) VALUES (?, ?, ?, ?, ?, ?)',
       [newUserId, googleUser.id, googleUser.email, tempPasswordHash, googleUser.name, 'user']
     );
+    await upsertSocialAuthIdentity(pool, newUserId, AUTH_PROVIDER.GOOGLE, googleUser.id);
 
     const token = jwt.sign(
       { id: newUserId, email: googleUser.email, name: googleUser.name, role: 'user' },
@@ -1716,12 +1774,12 @@ app.put('/api/auth/profile-update', authenticateToken, async (req, res) => {
   }
 
   try {
-    const [rows] = await pool.query('SELECT * FROM users WHERE id = ?', [req.user.id]);
-    if (rows.length === 0) {
+    const user = await getMergedUserById(req.user.id);
+    if (!user) {
       return res.status(404).json({ message: '사용자를 찾을 수 없습니다.' });
     }
 
-    await pool.query('UPDATE users SET phone = ?, address = ? WHERE id = ?', [phone, address, req.user.id]);
+    await upsertPrivateProfile(pool, req.user.id, phone, address);
     res.json({ success: true, message: '배송지 및 연락처 정보 등록이 완료되었습니다.' });
   } catch (error) {
     console.error(error);
@@ -1770,6 +1828,7 @@ app.post('/api/addresses', authenticateToken, async (req, res) => {
     if (is_default) {
       await connection.query('UPDATE user_addresses SET is_default = FALSE WHERE user_id = ?', [req.user.id]);
       await connection.query('UPDATE users SET phone = ?, address = ? WHERE id = ?', [normalizedPhone, base_address, req.user.id]);
+      await upsertPrivateProfile(connection, req.user.id, normalizedPhone, base_address);
     }
     const [result] = await connection.query(
       `INSERT INTO user_addresses
@@ -1824,6 +1883,7 @@ app.put('/api/addresses/:id', authenticateToken, async (req, res) => {
     if (is_default) {
       await connection.query('UPDATE user_addresses SET is_default = FALSE WHERE user_id = ?', [req.user.id]);
       await connection.query('UPDATE users SET phone = ?, address = ? WHERE id = ?', [normalizedPhone, base_address, req.user.id]);
+      await upsertPrivateProfile(connection, req.user.id, normalizedPhone, base_address);
     }
     const [result] = await connection.query(
       `UPDATE user_addresses
@@ -2289,24 +2349,6 @@ function parseBooleanFlag(value, fallback = true) {
   return true;
 }
 
-function slugifyProductName(name) {
-  const text = String(name || '')
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, '-')
-    .replace(/[^0-9a-z가-힣-]+/g, '')
-    .replace(/-+/g, '-')
-    .replace(/^-+|-+$/g, '');
-
-  return text || 'product';
-}
-
-function generateProductId(name) {
-  const slug = slugifyProductName(name);
-  const suffix = crypto.randomBytes(3).toString('hex');
-  return `${slug}-${suffix}`;
-}
-
 function parseCsv(text) {
   const rows = [];
   let row = [];
@@ -2368,8 +2410,8 @@ function mapCsvProducts(buffer) {
 
 app.post('/api/products', requireAdmin, async (req, res) => {
   const { id, name, category, price, image, description, specs, stock, brand, is_active } = req.body;
-  if (!name || !category || !price) {
-    return res.status(400).json({ message: '필수 상품 정보(상품명, 카테고리, 가격)를 입력해 주세요.' });
+  if (!id || !name || !category || !price) {
+    return res.status(400).json({ message: '필수 상품 정보(ID, 상품명, 카테고리, 가격)를 입력해 주세요.' });
   }
 
   const priceWarning = await validateProductPrice(Number(price), category);
@@ -2378,26 +2420,11 @@ app.post('/api/products', requireAdmin, async (req, res) => {
   }
 
   try {
-    const providedId = String(id || '').trim();
-    let productId = providedId;
-
-    if (!productId) {
-      let generatedId = generateProductId(name);
-      while (true) {
-        const [existingGenerated] = await pool.query('SELECT id FROM products WHERE id = ?', [generatedId]);
-        if (existingGenerated.length === 0) {
-          productId = generatedId;
-          break;
-        }
-        generatedId = generateProductId(name);
-      }
-    }
-
-    const [existing] = await pool.query('SELECT id, is_deleted FROM products WHERE id = ?', [productId]);
+    const [existing] = await pool.query('SELECT id, is_deleted FROM products WHERE id = ?', [id]);
     if (existing.length > 0) {
       if (existing[0].is_deleted) {
         return res.status(409).json({
-          message: '삭제 처리된 상품 ID입니다. 주문 보존을 위해 같은 ID를 다시 사용할 수 없습니다. 새로운 상품 ID를 사용해 주세요.'
+          message: '삭제 처리된 상품 ID입니다. 주문 보존을 위해 같은 ID를 다시 사용할 수 없습니다. 새 상품 ID를 사용해 주세요.'
         });
       }
       return res.status(400).json({ message: '이미 존재하는 상품 ID입니다.' });
@@ -2405,15 +2432,16 @@ app.post('/api/products', requireAdmin, async (req, res) => {
 
     await pool.query(
       'INSERT INTO products (id, name, category, brand, price, image, description, specs, stock, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [productId, name, category, normalizeBrand(brand), price, image, description, JSON.stringify(specs || {}), stock || 50, parseBooleanFlag(is_active, true)]
+      [id, name, category, normalizeBrand(brand), price, image, description, JSON.stringify(specs || {}), stock || 50, parseBooleanFlag(is_active, true)]
     );
 
-    res.status(201).json({ message: '상품이 성공적으로 등록되었습니다.', id: productId });
+    res.status(201).json({ message: '상품이 성공적으로 등록되었습니다.' });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: '서버 오류가 발생했습니다.' });
   }
 });
+
 app.put('/api/products/:id', requireAdmin, async (req, res) => {
   const { name, category, price, image, description, specs, stock, brand, is_active } = req.body;
   const productId = req.params.id;
@@ -2544,6 +2572,151 @@ app.post('/api/products/batch-out-of-stock', requireAdmin, async (req, res) => {
 });
 
 // ==========================================
+// Cart APIs
+// ==========================================
+app.get('/api/cart/count', authenticateToken, async (req, res) => {
+  try {
+    const count = await fetchCartCountForUser(pool, req.user.id);
+    res.json({ count });
+  } catch (error) {
+    console.error('Fetch Cart Count Error:', error);
+    res.status(500).json({ message: '멤버 개수를 불러오지 못했습니다.' });
+  }
+});
+
+app.get('/api/cart', authenticateToken, async (req, res) => {
+  try {
+    const cartItems = await fetchCartItemsForUser(pool, req.user.id);
+    res.json({ cartItems, count: cartItems.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0) });
+  } catch (error) {
+    console.error('Fetch Cart Error:', error);
+    res.status(500).json({ message: '장바구니를 불러오지 못했습니다.' });
+  }
+});
+
+app.post('/api/cart/items', authenticateToken, async (req, res) => {
+  const { productId, quantity = 1 } = req.body || {};
+  const normalizedQuantity = Math.max(1, Number(quantity) || 1);
+
+  if (!productId) {
+    return res.status(400).json({ message: '상품 ID가 필요합니다.' });
+  }
+
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    const product = await fetchActiveProductById(connection, productId);
+    if (!product) {
+      await connection.rollback();
+      return res.status(404).json({ message: '상품을 찾을 수 없습니다.' });
+    }
+
+    const [existingRows] = await connection.query(
+      'SELECT quantity FROM cart_items WHERE user_id = ? AND product_id = ? FOR UPDATE',
+      [req.user.id, productId]
+    );
+
+    const nextQuantity = (existingRows[0]?.quantity || 0) + normalizedQuantity;
+    if (existingRows.length > 0) {
+      await connection.query(
+        'UPDATE cart_items SET quantity = ?, updated_at = NOW() WHERE user_id = ? AND product_id = ?',
+        [nextQuantity, req.user.id, productId]
+      );
+    } else {
+      await connection.query(
+        'INSERT INTO cart_items (user_id, product_id, quantity) VALUES (?, ?, ?)',
+        [req.user.id, productId, nextQuantity]
+      );
+    }
+
+    const cartItems = await fetchCartItemsForUser(connection, req.user.id);
+    await connection.commit();
+    res.json({ success: true, cartItems, count: cartItems.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0) });
+  } catch (error) {
+    await connection.rollback();
+    console.error('Add Cart Item Error:', error);
+    res.status(500).json({ message: '장바구니 저장 중 오류가 발생했습니다.' });
+  } finally {
+    connection.release();
+  }
+});
+
+app.patch('/api/cart/items/:productId', authenticateToken, async (req, res) => {
+  const { quantity } = req.body || {};
+  const nextQuantity = Number(quantity);
+
+  if (!Number.isFinite(nextQuantity)) {
+    return res.status(400).json({ message: '수량이 올바르지 않습니다.' });
+  }
+
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    if (nextQuantity <= 0) {
+      await connection.query(
+        'DELETE FROM cart_items WHERE user_id = ? AND product_id = ?',
+        [req.user.id, req.params.productId]
+      );
+    } else {
+      const product = await fetchActiveProductById(connection, req.params.productId);
+      if (!product) {
+        await connection.rollback();
+        return res.status(404).json({ message: '상품을 찾을 수 없습니다.' });
+      }
+
+      await connection.query(
+        `INSERT INTO cart_items (user_id, product_id, quantity)
+         VALUES (?, ?, ?)
+         ON DUPLICATE KEY UPDATE quantity = VALUES(quantity), updated_at = NOW()`,
+        [req.user.id, req.params.productId, Math.max(1, Math.floor(nextQuantity))]
+      );
+    }
+
+    const cartItems = await fetchCartItemsForUser(connection, req.user.id);
+    await connection.commit();
+    res.json({ success: true, cartItems, count: cartItems.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0) });
+  } catch (error) {
+    await connection.rollback();
+    console.error('Update Cart Item Error:', error);
+    res.status(500).json({ message: '장바구니 수량 변경 중 오류가 발생했습니다.' });
+  } finally {
+    connection.release();
+  }
+});
+
+app.delete('/api/cart/items/:productId', authenticateToken, async (req, res) => {
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    await connection.query(
+      'DELETE FROM cart_items WHERE user_id = ? AND product_id = ?',
+      [req.user.id, req.params.productId]
+    );
+    const cartItems = await fetchCartItemsForUser(connection, req.user.id);
+    await connection.commit();
+    res.json({ success: true, cartItems, count: cartItems.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0) });
+  } catch (error) {
+    await connection.rollback();
+    console.error('Delete Cart Item Error:', error);
+    res.status(500).json({ message: '장바구니 상품 삭제 중 오류가 발생했습니다.' });
+  } finally {
+    connection.release();
+  }
+});
+
+app.delete('/api/cart/clear', authenticateToken, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM cart_items WHERE user_id = ?', [req.user.id]);
+    res.json({ success: true, cartItems: [], count: 0 });
+  } catch (error) {
+    console.error('Clear Cart Error:', error);
+    res.status(500).json({ message: '장바구니를 비우는 중 오류가 발생했습니다.' });
+  }
+});
+
+// ==========================================
 // Orders APIs
 // ==========================================
 const MAX_ORDER_QTY_PER_ITEM = 999;
@@ -2554,275 +2727,6 @@ function calculateShippingFee(subtotal) {
   if (subtotal <= 0) return 0;
   return subtotal >= FREE_SHIPPING_THRESHOLD ? 0 : DEFAULT_SHIPPING_FEE;
 }
-
-const MAX_CART_QTY_PER_ITEM = 999;
-
-const normalizeCartQuantity = (value, { allowZero = false } = {}) => {
-  const quantity = Number(value);
-  if (!Number.isInteger(quantity)) {
-    throw new Error('Quantity must be an integer.');
-  }
-  if (allowZero ? quantity < 0 : quantity < 1) {
-    throw new Error(allowZero ? 'Quantity cannot be negative.' : 'Quantity must be at least 1.');
-  }
-  if (quantity > MAX_CART_QTY_PER_ITEM) {
-    throw new Error(`Quantity cannot exceed ${MAX_CART_QTY_PER_ITEM}.`);
-  }
-  return quantity;
-};
-
-const buildCartSnapshot = (rows = []) => {
-  const items = rows.map((row) => {
-    const productId = String(row.product_id || '').trim();
-    const productExists = Boolean(row.cart_product_id);
-    const price = Number(row.price || 0);
-    const quantity = Number(row.quantity || 0);
-    const image = String(row.image || '');
-
-    return {
-      id: productId,
-      productId,
-      quantity,
-      price: productExists ? price : 0,
-      name: row.name || '',
-      image,
-      images: image ? image.split(',').map(part => part.trim()).filter(Boolean) : [],
-      brand: row.brand || '',
-      category: row.category || '',
-      stock: Number(row.stock || 0),
-      is_active: Boolean(row.is_active),
-      is_deleted: Boolean(row.is_deleted),
-      subtotal: productExists ? price * quantity : 0,
-      productExists
-    };
-  });
-
-  const count = items.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
-  const subtotal = items.reduce((sum, item) => sum + Number(item.subtotal || 0), 0);
-
-  return { items, count, subtotal };
-};
-
-const fetchCartSnapshot = async (connection, userId) => {
-  const [rows] = await connection.query(
-    `
-      SELECT
-        c.product_id,
-        c.quantity,
-        c.created_at,
-        c.updated_at,
-        p.id AS cart_product_id,
-        p.name,
-        p.category,
-        p.brand,
-        p.price,
-        p.image,
-        p.stock,
-        p.is_active,
-        p.is_deleted
-      FROM cart_items c
-      LEFT JOIN products p ON p.id = c.product_id
-      WHERE c.user_id = ?
-      ORDER BY c.updated_at DESC, c.id DESC
-    `,
-    [userId]
-  );
-
-  return buildCartSnapshot(rows);
-};
-
-const assertCartProductIsAvailable = async (connection, productId) => {
-  const [rows] = await connection.query(
-    `
-      SELECT id, name, price, stock, is_active, is_deleted, image, category, brand
-      FROM products
-      WHERE id = ?
-      FOR UPDATE
-    `,
-    [productId]
-  );
-
-  const product = rows[0];
-  if (!product) {
-    throw new Error('Product not found.');
-  }
-  if (product.is_deleted) {
-    throw new Error('This product has been removed.');
-  }
-  if (!product.is_active) {
-    throw new Error('This product is not available for sale.');
-  }
-
-  return product;
-};
-
-const fetchCartItemQuantity = async (connection, userId, productId) => {
-  const [rows] = await connection.query(
-    'SELECT quantity FROM cart_items WHERE user_id = ? AND product_id = ? FOR UPDATE',
-    [userId, productId]
-  );
-  return Number(rows[0]?.quantity || 0);
-};
-
-app.get('/api/cart', authenticateToken, async (req, res) => {
-  try {
-    const snapshot = await fetchCartSnapshot(pool, req.user.id);
-    res.json(snapshot);
-  } catch (error) {
-    console.error('Get Cart Error:', error);
-    res.status(500).json({ message: error.message || 'Failed to load cart.' });
-  }
-});
-
-app.get('/api/cart/count', authenticateToken, async (req, res) => {
-  try {
-    const [rows] = await pool.query(
-      'SELECT COALESCE(SUM(quantity), 0) AS count FROM cart_items WHERE user_id = ?',
-      [req.user.id]
-    );
-    res.json({ count: Number(rows[0]?.count || 0) });
-  } catch (error) {
-    console.error('Get Cart Count Error:', error);
-    res.status(500).json({ message: error.message || 'Failed to load cart count.' });
-  }
-});
-
-app.post('/api/cart/items', authenticateToken, async (req, res) => {
-  const productId = String(req.body?.productId ?? req.body?.id ?? '').trim();
-  const requestedQuantity = req.body?.quantity ?? 1;
-
-  if (!productId) {
-    return res.status(400).json({ message: 'productId is required.' });
-  }
-
-  let quantity;
-  try {
-    quantity = normalizeCartQuantity(requestedQuantity);
-  } catch (error) {
-    return res.status(400).json({ message: error.message });
-  }
-
-  const connection = await pool.getConnection();
-  try {
-    await connection.beginTransaction();
-
-    const product = await assertCartProductIsAvailable(connection, productId);
-    const currentQuantity = await fetchCartItemQuantity(connection, req.user.id, productId);
-    const nextQuantity = currentQuantity + quantity;
-
-    if (nextQuantity > Number(product.stock || 0)) {
-      throw new Error('Not enough stock for this cart item.');
-    }
-
-    if (currentQuantity > 0) {
-      await connection.query(
-        'UPDATE cart_items SET quantity = ? WHERE user_id = ? AND product_id = ?',
-        [nextQuantity, req.user.id, productId]
-      );
-    } else {
-      await connection.query(
-        'INSERT INTO cart_items (user_id, product_id, quantity) VALUES (?, ?, ?)',
-        [req.user.id, productId, nextQuantity]
-      );
-    }
-
-    await connection.commit();
-    const snapshot = await fetchCartSnapshot(connection, req.user.id);
-    res.json({ success: true, ...snapshot });
-  } catch (error) {
-    await connection.rollback();
-    console.error('Add Cart Item Error:', error);
-    res.status(400).json({ message: error.message || 'Failed to add cart item.' });
-  } finally {
-    connection.release();
-  }
-});
-
-app.patch('/api/cart/items/:productId', authenticateToken, async (req, res) => {
-  const productId = String(req.params.productId || '').trim();
-  if (!productId) {
-    return res.status(400).json({ message: 'productId is required.' });
-  }
-
-  let quantity;
-  try {
-    quantity = normalizeCartQuantity(req.body?.quantity, { allowZero: true });
-  } catch (error) {
-    return res.status(400).json({ message: error.message });
-  }
-
-  const connection = await pool.getConnection();
-  try {
-    await connection.beginTransaction();
-    const product = await assertCartProductIsAvailable(connection, productId);
-
-    if (quantity === 0) {
-      await connection.query(
-        'DELETE FROM cart_items WHERE user_id = ? AND product_id = ?',
-        [req.user.id, productId]
-      );
-      await connection.commit();
-      const snapshot = await fetchCartSnapshot(connection, req.user.id);
-      return res.json({ success: true, ...snapshot });
-    }
-
-    if (quantity > Number(product.stock || 0)) {
-      throw new Error('Not enough stock for this cart item.');
-    }
-
-    const currentQuantity = await fetchCartItemQuantity(connection, req.user.id, productId);
-    if (currentQuantity === 0) {
-      await connection.query(
-        'INSERT INTO cart_items (user_id, product_id, quantity) VALUES (?, ?, ?)',
-        [req.user.id, productId, quantity]
-      );
-    } else {
-      await connection.query(
-        'UPDATE cart_items SET quantity = ? WHERE user_id = ? AND product_id = ?',
-        [quantity, req.user.id, productId]
-      );
-    }
-
-    await connection.commit();
-    const snapshot = await fetchCartSnapshot(connection, req.user.id);
-    res.json({ success: true, ...snapshot });
-  } catch (error) {
-    await connection.rollback();
-    console.error('Update Cart Item Error:', error);
-    res.status(400).json({ message: error.message || 'Failed to update cart item.' });
-  } finally {
-    connection.release();
-  }
-});
-
-app.delete('/api/cart/items/:productId', authenticateToken, async (req, res) => {
-  const productId = String(req.params.productId || '').trim();
-  if (!productId) {
-    return res.status(400).json({ message: 'productId is required.' });
-  }
-
-  try {
-    await pool.query(
-      'DELETE FROM cart_items WHERE user_id = ? AND product_id = ?',
-      [req.user.id, productId]
-    );
-    const snapshot = await fetchCartSnapshot(pool, req.user.id);
-    res.json({ success: true, ...snapshot });
-  } catch (error) {
-    console.error('Delete Cart Item Error:', error);
-    res.status(500).json({ message: error.message || 'Failed to delete cart item.' });
-  }
-});
-
-app.delete('/api/cart', authenticateToken, async (req, res) => {
-  try {
-    await pool.query('DELETE FROM cart_items WHERE user_id = ?', [req.user.id]);
-    res.json({ success: true, items: [], count: 0, subtotal: 0 });
-  } catch (error) {
-    console.error('Clear Cart Error:', error);
-    res.status(500).json({ message: error.message || 'Failed to clear cart.' });
-  }
-});
 
 app.post('/api/orders', authenticateToken, async (req, res) => {
   const {
@@ -2836,7 +2740,7 @@ app.post('/api/orders', authenticateToken, async (req, res) => {
     tax_note = ''
   } = req.body;
   if (!order_items || !address) {
-    return res.status(400).json({ message: '주문 정보가 누락되었습니다.' });
+    return res.status(400).json({ message: '주문을 처리할 수 없습니다.' });
   }
 
   const normalizedPaymentMethod = payment_method === 'mock_card' ? 'mock_card' : 'mock_card';
@@ -2853,7 +2757,7 @@ app.post('/api/orders', authenticateToken, async (req, res) => {
     await connection.beginTransaction();
 
     if (!Array.isArray(order_items) || order_items.length === 0) {
-      throw new Error('주문 상품 정보가 올바르지 않습니다.');
+      throw new Error('주문 항목이 올바르지 않습니다.');
     }
 
     const requestedItems = [];
@@ -2864,21 +2768,21 @@ app.post('/api/orders', authenticateToken, async (req, res) => {
       const quantity = Number(rawItem?.quantity);
 
       if (!productId) {
-        throw new Error('주문 상품 ID가 올바르지 않습니다.');
+        throw new Error('상품 ID가 올바르지 않습니다.');
       }
       if (!Number.isInteger(quantity)) {
-        throw new Error(`수량은 정수여야 합니다: ${productId}`);
+        throw new Error(`??? ???? ???: ${productId}`);
       }
       if (quantity < 1) {
-        throw new Error(`수량은 1개 이상이어야 합니다: ${productId}`);
+        throw new Error(`??? 1? ????? ???: ${productId}`);
       }
       if (quantity > MAX_ORDER_QTY_PER_ITEM) {
-        throw new Error(`상품당 최대 주문 수량을 초과했습니다: ${productId}`);
+        throw new Error(`??? ?? ?? ??? ??????: ${productId}`);
       }
 
       const nextQuantity = (quantityByProductId.get(productId) || 0) + quantity;
       if (nextQuantity > MAX_ORDER_QTY_PER_ITEM) {
-        throw new Error(`상품당 최대 주문 수량을 초과했습니다: ${productId}`);
+        throw new Error(`??? ?? ?? ??? ??????: ${productId}`);
       }
 
       quantityByProductId.set(productId, nextQuantity);
@@ -2902,13 +2806,13 @@ app.post('/api/orders', authenticateToken, async (req, res) => {
     for (const productId of requestedItems) {
       const product = productMap.get(productId);
       if (!product) {
-        throw new Error(`삭제되었거나 존재하지 않는 상품입니다: ${productId}`);
+        throw new Error(`?????? ???? ?? ?????: ${productId}`);
       }
       if (product.is_deleted) {
-        throw new Error(`삭제되었거나 존재하지 않는 상품입니다: ${product.name}`);
+        throw new Error(`?????? ???? ?? ?????: ${product.name}`);
       }
       if (!product.is_active) {
-        throw new Error(`판매 중지된 상품입니다: ${product.name}`);
+        throw new Error(`?? ??? ?????: ${product.name}`);
       }
 
       const unitPrice = Number(product.price);
@@ -2916,13 +2820,13 @@ app.post('/api/orders', authenticateToken, async (req, res) => {
       const stock = Number(product.stock);
 
       if (!Number.isFinite(unitPrice) || unitPrice <= 0) {
-        throw new Error(`상품 가격이 올바르지 않습니다: ${product.name}`);
+        throw new Error(`?? ??? ???? ????: ${product.name}`);
       }
       if (!Number.isInteger(quantity) || quantity < 1) {
-        throw new Error(`수량이 올바르지 않습니다: ${product.name}`);
+        throw new Error(`??? ???? ????: ${product.name}`);
       }
       if (!Number.isInteger(stock) || stock < quantity) {
-        throw new Error(`상품 재고가 부족합니다: ${product.name}`);
+        throw new Error(`?? ??? ?????: ${product.name}`);
       }
 
       const itemSubtotal = unitPrice * quantity;
@@ -2941,7 +2845,7 @@ app.post('/api/orders', authenticateToken, async (req, res) => {
     const serverTotalAmount = subtotalAmount + shippingFee;
     const clientTotalAmount = Number(total_amount);
     if (Number.isFinite(clientTotalAmount) && clientTotalAmount !== serverTotalAmount) {
-      throw new Error('주문 금액이 올바르지 않습니다. 다시 확인해 주세요.');
+      throw new Error('주문 금액이 올바르지 않습니다. 다시 시도해 주세요.');
     }
 
     await connection.query(
@@ -2964,26 +2868,26 @@ app.post('/api/orders', authenticateToken, async (req, res) => {
       ]
     );
 
-    // Update stock & Update analytics
     for (const item of serverOrderItems) {
       const [stockResult] = await connection.query(
         'UPDATE products SET stock = stock - ? WHERE id = ? AND stock >= ? AND is_active = TRUE AND is_deleted = FALSE',
         [item.quantity, item.id, item.quantity]
       );
       if (!stockResult.affectedRows) {
-        throw new Error(`상품 재고가 부족합니다: ${item.name}`);
+        throw new Error(`?? ??? ?????: ${item.name}`);
       }
     }
 
     const todayString = new Date().toISOString().split('T')[0];
-    await connection.query(`
-      INSERT INTO analytics (date, revenue, visitors) VALUES (?, ?, 1)
-      ON DUPLICATE KEY UPDATE revenue = revenue + VALUES(revenue)
-    `, [todayString, serverTotalAmount]);
+    await connection.query(
+      `INSERT INTO analytics (date, revenue, visitors) VALUES (?, ?, 1)
+       ON DUPLICATE KEY UPDATE revenue = revenue + VALUES(revenue)`,
+      [todayString, serverTotalAmount]
+    );
 
     await connection.commit();
     res.json({
-      message: '주문이 접수되었습니다.',
+      message: '주문이 완료되었습니다.',
       orderId,
       totalAmount: serverTotalAmount,
       shippingFee,
@@ -2993,14 +2897,13 @@ app.post('/api/orders', authenticateToken, async (req, res) => {
   } catch (error) {
     await connection.rollback();
     console.error(error);
-    const message = error?.message || '서버 오류가 발생했습니다.';
-    const statusCode = /재고|판매 중지|삭제되었|올바르지 않|금액/.test(message) ? 400 : 500;
+    const message = error?.message || '주문 처리 중 오류가 발생했습니다.';
+    const statusCode = message === '주문 처리 중 오류가 발생했습니다.' ? 500 : 400;
     res.status(statusCode).json({ message });
   } finally {
     connection.release();
   }
 });
-
 app.get('/api/orders', authenticateToken, async (req, res) => {
   try {
     const [rows] = await pool.query(`
@@ -3076,21 +2979,19 @@ app.post('/api/admin/users/:id/detail', requireAdmin, async (req, res) => {
   }
 
   try {
-    const [adminRows] = await pool.query('SELECT password FROM users WHERE id = ? AND role = ?', [req.user.id, 'admin']);
-    if (adminRows.length === 0) {
+    const adminUser = await getMergedUserById(req.user.id);
+    if (!adminUser || adminUser.role !== 'admin') {
       return res.status(403).json({ message: '관리자 계정을 확인할 수 없습니다.' });
     }
 
-    const passwordMatch = bcrypt.compareSync(password, adminRows[0].password);
+    const adminPasswordHash = adminUser.auth_password_hash || adminUser.password;
+    const passwordMatch = adminPasswordHash ? bcrypt.compareSync(password, adminPasswordHash) : false;
     if (!passwordMatch) {
       return res.status(401).json({ message: '관리자 비밀번호가 일치하지 않습니다.' });
     }
 
-    const [userRows] = await pool.query(
-      'SELECT id, email, name, phone, address, role, created_at FROM users WHERE id = ?',
-      [req.params.id]
-    );
-    if (userRows.length === 0) {
+    const user = await getMergedUserById(req.params.id);
+    if (!user) {
       return res.status(404).json({ message: '고객 정보를 찾을 수 없습니다.' });
     }
 
@@ -3118,7 +3019,15 @@ app.post('/api/admin/users/:id/detail', requireAdmin, async (req, res) => {
     const totalSpent = parsedOrders.reduce((sum, order) => sum + Number(order.total_amount || 0), 0);
 
     res.json({
-      user: userRows[0],
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        phone: user.phone,
+        address: user.address,
+        role: user.role,
+        created_at: user.created_at
+      },
       summary: {
         order_count: parsedOrders.length,
         total_spent: totalSpent,
@@ -4032,7 +3941,7 @@ app.use(async (req, res, next) => {
 // Start Server
 // ==========================================
 initDb().then(() => {
-  app.listen(PORT, () => {
+  const startServer = () => {
     console.log(`Backend Server running on port ${PORT}`);
 
     // ② 10일 경과 발송 주문 자동 배송완료 처리 (API 호출 없음)
@@ -4072,15 +3981,15 @@ initDb().then(() => {
           await connection.beginTransaction();
 
           // 1. 기존 유저 조회
-          const [userRows] = await connection.query('SELECT * FROM users WHERE id = ?', [userId]);
-          if (userRows.length === 0) {
+          const user = await getMergedUserById(userId);
+          if (!user) {
             await connection.rollback();
             return res.status(404).json({ message: '사용자를 찾을 수 없습니다.' });
           }
 
           // 2. 정보 업데이트 쿼리 동적 생성
           let updateQuery = 'UPDATE users SET name = ?';
-          let updateParams = [name || userRows[0].name];
+          let updateParams = [name || user.name];
 
           if (phone !== undefined) {
             const normalizedPhone = String(phone || '').replace(/\D/g, '');
@@ -4088,27 +3997,24 @@ initDb().then(() => {
               await connection.rollback();
               return res.status(400).json({ message: '휴대폰 번호를 올바르게 입력해 주세요. 예: 010-1234-5678' });
             }
-            updateQuery += ', phone = ?';
-            updateParams.push(normalizedPhone);
+            await upsertPrivateProfile(connection, userId, normalizedPhone, undefined);
           }
 
           if (password && password.trim() !== '') {
             const passwordError = validatePasswordPolicy(password, {
-              email: userRows[0].email,
-              name: name || userRows[0].name
+              email: user.email,
+              name: name || user.name
             });
             if (passwordError) {
               await connection.rollback();
               return res.status(400).json({ message: passwordError });
             }
             const hashedPassword = await bcrypt.hash(password, 10);
-            updateQuery += ', password = ?';
-            updateParams.push(hashedPassword);
+            await upsertLocalAuthIdentity(connection, userId, user.email, hashedPassword);
           }
 
           if (address !== undefined) {
-            updateQuery += ', address = ?';
-            updateParams.push(address);
+            await upsertPrivateProfile(connection, userId, undefined, address);
           }
 
           updateQuery += ' WHERE id = ?';
@@ -4118,8 +4024,8 @@ initDb().then(() => {
           await connection.commit();
 
           // 3. 갱신된 회원 정보 반환
-          const [updatedUser] = await pool.query('SELECT id, email, name, phone, role, address, created_at FROM users WHERE id = ?', [userId]);
-          res.json({ success: true, message: '회원 정보가 수정되었습니다.', user: updatedUser[0] });
+          const updatedUser = await getMergedUserById(userId);
+          res.json({ success: true, message: '회원 정보가 수정되었습니다.', user: updatedUser });
         } catch (err) {
           await connection.rollback();
           throw err;
@@ -4142,19 +4048,19 @@ initDb().then(() => {
       }
 
       try {
-        const [rows] = await pool.query('SELECT password FROM users WHERE id = ?', [userId]);
-        if (rows.length === 0) {
+        const user = await getMergedUserById(userId);
+        if (!user) {
           return res.status(404).json({ message: '사용자를 찾을 수 없습니다.' });
         }
 
-        const user = rows[0];
         
         // 간편 로그인 회원의 경우 password가 비어있으므로 검증 생략
-        if (!user.password) {
+        const passwordHash = user.auth_password_hash || user.password;
+        if (!passwordHash) {
           return res.json({ success: true, isSocial: true });
         }
 
-        const passwordMatch = bcrypt.compareSync(password, user.password);
+        const passwordMatch = bcrypt.compareSync(password, passwordHash);
         if (!passwordMatch) {
           return res.status(400).json({ message: '비밀번호가 일치하지 않습니다.' });
         }
@@ -4215,7 +4121,16 @@ initDb().then(() => {
       });
       console.log('Serving static frontend from dist/');
     }
-  });
+  };
+
+  if (process.env.VERCEL !== '1') {
+    app.listen(PORT, startServer);
+  } else {
+    startServer();
+  }
 }).catch(err => {
   console.error('Failed to initialize server due to Database error.', err);
 });
+
+export { app };
+export default app;

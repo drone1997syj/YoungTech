@@ -46,7 +46,7 @@ export async function initDb() {
         kakao_id VARCHAR(255) UNIQUE,
         google_id VARCHAR(255) UNIQUE,
         email VARCHAR(150) UNIQUE NOT NULL,
-        password VARCHAR(255) NOT NULL,
+        password VARCHAR(255) DEFAULT NULL,
         name VARCHAR(100) NOT NULL,
         phone VARCHAR(50),
         address TEXT,
@@ -127,87 +127,78 @@ export async function initDb() {
       await connection.query(`
         ALTER TABLE users MODIFY COLUMN password VARCHAR(255) DEFAULT NULL
       `);
-      console.log('Successfully relaxed password column to allow auth split.');
+      console.log('Successfully checked/updated password column nullability.');
     } catch (err) {}
 
-    // Split auth/private profile tables
     await connection.query(`
       CREATE TABLE IF NOT EXISTS user_auth_identities (
         id BIGINT AUTO_INCREMENT PRIMARY KEY,
         user_id VARCHAR(100) NOT NULL,
-        provider VARCHAR(20) NOT NULL,
-        provider_user_id VARCHAR(255) NOT NULL,
+        provider VARCHAR(50) NOT NULL,
+        provider_user_id VARCHAR(255) DEFAULT NULL,
         password_hash VARCHAR(255) DEFAULT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         UNIQUE KEY uq_user_provider (user_id, provider),
-        UNIQUE KEY uq_provider_identity (provider, provider_user_id),
-        KEY idx_auth_user (user_id),
-        KEY idx_auth_provider (provider)
-      ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        UNIQUE KEY uq_provider_user (provider, provider_user_id)
+      ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
     `);
 
     await connection.query(`
       CREATE TABLE IF NOT EXISTS user_private_profiles (
         user_id VARCHAR(100) PRIMARY KEY,
-        phone VARCHAR(50),
+        phone VARCHAR(50) DEFAULT NULL,
         address TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        KEY idx_profile_phone (phone)
-      ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
     `);
 
-    // Backfill split tables from legacy users data when needed.
     await connection.query(`
       INSERT INTO user_auth_identities (user_id, provider, provider_user_id, password_hash)
       SELECT id, 'local', email, password
       FROM users
-      WHERE password IS NOT NULL AND password <> ''
+      WHERE email IS NOT NULL AND password IS NOT NULL AND password <> ''
       ON DUPLICATE KEY UPDATE
         provider_user_id = VALUES(provider_user_id),
-        password_hash = VALUES(password_hash),
-        updated_at = CURRENT_TIMESTAMP
+        password_hash = VALUES(password_hash)
     `);
 
     await connection.query(`
-      INSERT INTO user_auth_identities (user_id, provider, provider_user_id, password_hash)
-      SELECT id, 'naver', naver_id, NULL
+      INSERT INTO user_auth_identities (user_id, provider, provider_user_id)
+      SELECT id, 'naver', naver_id
       FROM users
       WHERE naver_id IS NOT NULL AND naver_id <> ''
       ON DUPLICATE KEY UPDATE
-        provider_user_id = VALUES(provider_user_id),
-        updated_at = CURRENT_TIMESTAMP
+        provider_user_id = VALUES(provider_user_id)
     `);
 
     await connection.query(`
-      INSERT INTO user_auth_identities (user_id, provider, provider_user_id, password_hash)
-      SELECT id, 'kakao', kakao_id, NULL
+      INSERT INTO user_auth_identities (user_id, provider, provider_user_id)
+      SELECT id, 'kakao', kakao_id
       FROM users
       WHERE kakao_id IS NOT NULL AND kakao_id <> ''
       ON DUPLICATE KEY UPDATE
-        provider_user_id = VALUES(provider_user_id),
-        updated_at = CURRENT_TIMESTAMP
+        provider_user_id = VALUES(provider_user_id)
     `);
 
     await connection.query(`
-      INSERT INTO user_auth_identities (user_id, provider, provider_user_id, password_hash)
-      SELECT id, 'google', google_id, NULL
+      INSERT INTO user_auth_identities (user_id, provider, provider_user_id)
+      SELECT id, 'google', google_id
       FROM users
       WHERE google_id IS NOT NULL AND google_id <> ''
       ON DUPLICATE KEY UPDATE
-        provider_user_id = VALUES(provider_user_id),
-        updated_at = CURRENT_TIMESTAMP
+        provider_user_id = VALUES(provider_user_id)
     `);
 
     await connection.query(`
       INSERT INTO user_private_profiles (user_id, phone, address)
       SELECT id, phone, address
       FROM users
+      WHERE (phone IS NOT NULL AND phone <> '') OR (address IS NOT NULL AND address <> '')
       ON DUPLICATE KEY UPDATE
         phone = VALUES(phone),
-        address = VALUES(address),
-        updated_at = CURRENT_TIMESTAMP
+        address = VALUES(address)
     `);
 
     try {
@@ -238,7 +229,7 @@ export async function initDb() {
         sort_order INT DEFAULT 0,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-      ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
     `);
 
     // Ensure sort_order exists in categories
@@ -248,29 +239,47 @@ export async function initDb() {
     } catch (err) {}
 
     try {
+      await connection.query(`ALTER TABLE categories ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at`);
+      console.log('Successfully checked/added updated_at column to categories.');
+    } catch (err) {}
+
+    try {
       await connection.query(`ALTER TABLE categories ADD COLUMN parent_id VARCHAR(100) DEFAULT NULL AFTER name`);
       console.log('Successfully checked/added parent_id column to categories.');
     } catch (err) {}
 
-    const defaultCategoryLayout = [
-      ['motor', '모터', null, 1],
-      ['reducer', '감속기', null, 2],
-      ['plc', 'PLC', null, 3],
-      ['robot', '로봇', 'motor', 1],
-      ['motion', '볼스크류/LM', 'motor', 2]
-    ];
-
-    for (const [id, name, parentId, sortOrder] of defaultCategoryLayout) {
+    const [categoryRows] = await connection.query('SELECT COUNT(*) as count FROM categories');
+    if (categoryRows[0].count === 0) {
+      console.log('Seeding default categories...');
       await connection.query(`
-        INSERT INTO categories (id, name, parent_id, sort_order)
-        VALUES (?, ?, ?, ?)
-        ON DUPLICATE KEY UPDATE
-          name = VALUES(name),
-          parent_id = VALUES(parent_id),
-          sort_order = VALUES(sort_order)
-      `, [id, name, parentId, sortOrder]);
+        INSERT INTO categories (id, name, sort_order) VALUES
+        ('motor', '모터', 1),
+        ('reducer', '감속기', 2),
+        ('robot', '로봇', 3),
+        ('plc', 'PLC', 4),
+        ('motion', '볼스크류/LM', 5)
+      `);
+      console.log('Categories seeded.');
     }
-    console.log('Default categories ensured.');
+
+    const [motorChildRows] = await connection.query(
+      'SELECT COUNT(*) as count FROM categories WHERE parent_id = ?',
+      ['motor']
+    );
+    if (motorChildRows[0].count === 0) {
+      await connection.query(`
+        INSERT INTO categories (id, name, parent_id, sort_order) VALUES
+        ('panasonic', '파나소닉', 'motor', 1),
+        ('inovance', '이노밴스', 'motor', 2),
+        ('mitsubishi', '미쓰비시', 'motor', 3),
+        ('nidec', '니덱', 'motor', 4),
+        ('nikki-denso', '니키덴소', 'motor', 5),
+        ('moons', '문스', 'motor', 6),
+        ('rs-automation', 'RS오토메이션', 'motor', 7),
+        ('none', '없음', 'motor', 8)
+      `);
+      console.log('Motor subcategories seeded.');
+    }
 
     // 2. products table
     await connection.query(`
@@ -299,7 +308,7 @@ export async function initDb() {
         is_active BOOLEAN DEFAULT TRUE,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-      ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
     `);
 
     // Ensure sort_order exists in products
@@ -366,7 +375,20 @@ export async function initDb() {
       )
     `);
 
-    // 4. analytics table
+    // 4. cart_items table
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS cart_items (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        user_id VARCHAR(100) NOT NULL,
+        product_id VARCHAR(100) NOT NULL,
+        quantity INT NOT NULL DEFAULT 1,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_cart_items_user_product (user_id, product_id)
+      ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+    `);
+
+    // 5. analytics table
     await connection.query(`
       CREATE TABLE IF NOT EXISTS analytics (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -376,7 +398,7 @@ export async function initDb() {
       )
     `);
 
-    // 5. reviews table
+    // 6. reviews table
     await connection.query(`
       CREATE TABLE IF NOT EXISTS reviews (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -389,7 +411,7 @@ export async function initDb() {
       )
     `);
 
-    // 6. qna table
+    // 7. qna table
     await connection.query(`
       CREATE TABLE IF NOT EXISTS qna (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -404,20 +426,18 @@ export async function initDb() {
       )
     `);
 
-    // 7. cart_items table
-    await connection.query(`
-      CREATE TABLE IF NOT EXISTS cart_items (
-        id BIGINT AUTO_INCREMENT PRIMARY KEY,
-        user_id VARCHAR(100) NOT NULL,
-        product_id VARCHAR(100) NOT NULL,
-        quantity INT NOT NULL DEFAULT 1,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        UNIQUE KEY uq_cart_user_product (user_id, product_id),
-        KEY idx_cart_user_updated (user_id, updated_at),
-        KEY idx_cart_product (product_id)
-      ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-    `);
+    try {
+      await connection.query(`ALTER TABLE cart_items ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at`);
+      console.log('Successfully checked/added updated_at column to cart_items.');
+    } catch (err) {}
+
+    try {
+      await connection.query(`ALTER TABLE cart_items ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP AFTER quantity`);
+      console.log('Successfully checked/added created_at column to cart_items.');
+    } catch (err) {}
+
+    await ensureIndex(connection, 'cart_items', 'idx_cart_items_user_product', '`user_id`, `product_id`');
+    await ensureIndex(connection, 'cart_items', 'idx_cart_items_user_updated', '`user_id`, `updated_at`');
 
     // Check and add carrier, tracking_number, confirmed_at columns to orders table if they don't exist
     const [columns] = await connection.query(`SHOW COLUMNS FROM orders`);
